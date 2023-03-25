@@ -3,13 +3,24 @@ use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Debug)]
 pub struct DbError {
-    /// 通过error_code对照账单得到相应的话术
-    pub message: String,
-
     /// 有errCode转化而来
     pub sql_state: String,
 
+    /// 通过sql_state对照账单得到相应的话术
+    pub message: String,
+
     pub error_code: u64,
+
+}
+
+impl DbError {
+    pub fn get(error_code:u64){
+
+    }
+
+    pub fn get_state(){
+
+    }
 }
 
 impl Display for DbError {
