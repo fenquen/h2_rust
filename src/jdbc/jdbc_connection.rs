@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::properties_type;
 use anyhow::Result;
 
+#[derive(Default)]
 pub struct JdbcConnection {}
 
 impl JdbcConnection {

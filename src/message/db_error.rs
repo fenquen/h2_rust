@@ -14,22 +14,30 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct DbError {
-    /// 有errCode转化而来
+    /// 有errCode转化而来,远程用到
     pub sql_state: String,
 
-    /// 通过sql_state对照账单得到相应的话术
+    /// 通过sql_state对照账单得到相应的话术,远程用到
     pub message: String,
 
-    pub error_code: u64,
+    pub error_code: ErrorCode,
 
 }
 
 impl DbError {
-    pub fn get(error_code: ErrorCode) {
-        error_code::get_state(error_code);
+    pub fn get(error_code: ErrorCode, params: Vec<&str>) -> DbError {
+        // error_code对应的文本
+        let sql_state = error_code::get_state(error_code);
+        let message = Self::translate(&sql_state, params);
+
+        DbError {
+            sql_state,
+            message,
+            error_code,
+        }
     }
 
-    fn translate(sql_state: &str, params: &Vec<&str>) -> String {
+    fn translate(sql_state: &str, params: Vec<&str>) -> String {
         // 是相应的模板文本
         let mut message = match MESSAEGS.get(sql_state) {
             Some(s) => s.clone(),
@@ -54,6 +62,7 @@ impl Display for DbError {
 }
 
 impl Error for DbError {}
+
 #[cfg(test)]
 mod test {
     use crate::message::db_error::DbError;
@@ -61,6 +70,6 @@ mod test {
     #[test]
     fn test_translate() {
         use crate::message::db_error;
-       println!("{}", DbError::translate("07001",&vec!["a","a"]));
+        println!("{}", DbError::translate("07001", vec!["a", "a"]));
     }
 }
