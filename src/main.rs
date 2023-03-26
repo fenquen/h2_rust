@@ -6,6 +6,7 @@ mod test;
 mod common;
 mod engine;
 mod message;
+mod api;
 
 fn main() {
     println!("Hello, world!");
