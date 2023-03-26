@@ -34,4 +34,15 @@ pub fn any() {
 pub fn test_translate() {
 
 
+    trait Showable{
+       fn show(&self){ // 要有self
+
+       }
+    }
+
+    impl dyn Showable {
+        fn a(){
+
+        }
+    }
 }
