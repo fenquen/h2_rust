@@ -1,2 +1,2 @@
 pub mod driver;
-mod jdbc_connection;
+pub mod jdbc_connection;

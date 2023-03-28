@@ -11,5 +11,5 @@ pub fn connect(url: String, properties: properties_type!()) -> Result<JdbcConnec
     }
 
 
-    ConnectionInfo::get_format_exception(&url).map(|a| JdbcConnection{})
+    todo!()
 }

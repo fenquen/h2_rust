@@ -3,10 +3,12 @@
 
 mod jdbc;
 mod test;
-mod common;
+mod h2_rust_common;
 mod engine;
 mod message;
 mod api;
+mod command;
+mod util;
 
 fn main() {
     println!("Hello, world!");

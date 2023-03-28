@@ -4,12 +4,11 @@ use std::fmt::{Debug, Display, format, Formatter};
 use std::path::Path;
 use lazy_static::lazy_static;
 use crate::api::error_code;
-use crate::api::error_code::ErrorCode;
-use crate::common::util;
-use crate::common::Properties;
+use crate::h2_rust_common::{Integer, h2_rust_utils};
+use crate::h2_rust_common::Properties;
 
 lazy_static! {
-  static ref MESSAEGS:Properties = util::load_properties(Path::new("_messages_en.properties")).unwrap();
+  static ref MESSAEGS:Properties = h2_rust_utils::load_properties(Path::new("_messages_en.properties")).unwrap();
 }
 
 #[derive(Debug)]
@@ -20,12 +19,16 @@ pub struct DbError {
     /// 通过sql_state对照账单得到相应的话术,远程用到
     pub message: String,
 
-    pub error_code: ErrorCode,
+    pub error_code: Integer,
 
 }
 
 impl DbError {
-    pub fn get(error_code: ErrorCode, params: Vec<&str>) -> DbError {
+    pub fn get_internal_error(s: &str) -> DbError {
+        Self::get(error_code::GENERAL_ERROR_1, vec![s])
+    }
+
+    pub fn get(error_code: Integer, params: Vec<&str>) -> DbError {
         // error_code对应的文本
         let sql_state = error_code::get_state(error_code);
         let message = Self::translate(&sql_state, params);

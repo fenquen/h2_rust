@@ -1,35 +1,321 @@
-use std::collections::HashMap;
-use crate::engine::constant as engine_constant;
-use crate::properties_type;
+use std::collections::{HashMap, HashSet};
+use std::sync::Once;
+use crate::engine::{constant as engine_constant, constant, db_settings};
 use anyhow::Result;
+use lazy_static::lazy_static;
+use toml::value::Index;
 use crate::api::error_code;
+use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant};
 use crate::message::db_error::DbError;
+use crate::command::set_types;
+use crate::engine::db_settings::DbSettings;
+use crate::{h2_rust_common, throw};
+use crate::util::{io_utils, string_utils, utils};
+
+static COMMON_SETTINGS: [&str; 12] = [
+    "ACCESS_MODE_DATA", "AUTO_RECONNECT", "AUTO_SERVER", "AUTO_SERVER_PORT",
+    "CACHE_TYPE",
+    "FILE_LOCK",
+    "JMX",
+    "NETWORK_TIMEOUT",
+    "OLD_INFORMATION_SCHEMA", "OPEN_NEW",
+    "PAGE_SIZE",
+    "RECOVER"];
+
+lazy_static! {
+    pub static ref KNOWN_SETTINGS:HashSet<String> = {
+
+        let settings = [
+            "AUTHREALM", "AUTHZPWD", "AUTOCOMMIT",
+            "CIPHER", "CREATE",
+            "FORBID_CREATION",
+            "IGNORE_UNKNOWN_SETTINGS", "IFEXISTS", "INIT",
+            "NO_UPGRADE",
+            "PASSWORD", "PASSWORD_HASH",
+            "RECOVER_TEST",
+            "USER"];
+
+        let mut knowing_settings = HashSet::<String>::with_capacity(128);
+
+        // todo 优化实现addAll
+        h2_rust_utils::add_all(&mut knowing_settings,set_types::get_types());
+
+        for common_setting in COMMON_SETTINGS {
+            if knowing_settings.contains(common_setting) {
+                panic!("knowing_settings has already contain {}", common_setting);
+            }
+
+            knowing_settings.insert(common_setting.to_string());
+        }
+
+        for setting in settings {
+            if knowing_settings.contains(setting) {
+                panic!("knowing_settings has already contain {}", setting);
+            }
+
+            knowing_settings.insert(setting.to_string());
+        }
+
+        knowing_settings
+    };
+
+    pub static ref IGNORED_BY_PARSER:HashSet<String> = {
+        let mut ignored_by_parser = HashSet::with_capacity(64);
+
+        h2_rust_utils::add_all(&mut ignored_by_parser, &COMMON_SETTINGS);
+        h2_rust_utils::add_all(&mut ignored_by_parser,&["ASSERT", "BINARY_COLLATION", "DB_CLOSE_ON_EXIT", "PAGE_STORE", "UUID_COLLATION"]);
+
+        ignored_by_parser
+    };
+}
 
 pub struct ConnectionInfo {
     pub url: String,
     pub original_url: String,
+    pub prop: Properties,
+    pub user: String,
+    /// database name
+    pub name: String,
+    pub persistent: bool,
+    pub remote: bool,
+    pub ssl: bool,
+    pub unnamed: bool,
+    pub user_password_hash: Vec<u8>,
 }
 
 impl ConnectionInfo {
     pub fn new(url: String,
-               properties: properties_type!(),
+               info: &Properties,
                user: String,
-               password: impl ToString) -> Result<ConnectionInfo> {
-        let mut this_url = url.clone();
+               password: String) -> Result<ConnectionInfo> {
+        let mut connection_info = ConnectionInfo {
+            url: Default::default(),
+            original_url: Default::default(),
+            prop: Default::default(),
+            user: Default::default(),
+            name: Default::default(),
+            persistent: false,
+            remote: false,
+            ssl: false,
+            unnamed: false,
+            user_password_hash: Default::default(),
+        };
 
-        if !url.starts_with(engine_constant::START_URL) {
-            Self::get_format_exception(&url)?;
-        }
+        connection_info.init(url, info, user, password)?;
 
-        Ok(ConnectionInfo {
-            url: this_url,
-            original_url: url.clone(),
-        })
+        Ok(connection_info)
     }
 
-    pub fn get_format_exception(url: &str) -> Result<ConnectionInfo> {
-        Err(DbError::get(error_code::URL_FORMAT_ERROR_2,
-                         vec![engine_constant::URL_FORMAT, url]))?
+    fn init(&mut self,
+            url: String,
+            info: &Properties,
+            user: String,
+            password: String) -> Result<()> {
+        self.original_url = url.clone();
+        self.url = url;
+
+        if !self.url.starts_with(engine_constant::START_URL) {
+            throw!(self.get_format_exception());
+        }
+
+        if !info.is_empty() {
+            self.read_properties(info)?;
+        }
+
+        if !user.is_empty() {
+            self.prop.insert("USER".to_string(), user);
+        }
+
+        if !password.is_empty() {
+            self.prop.insert("PASSWORD".to_string(), password);
+        }
+
+        Self::read_settings_from_url(self);
+
+        // 以下书写是错误的  cannot borrow `*self` as mutable more than once at a time
+        // Self::set_user_name(self, Self::remove_property(self, "USER", h2_rust_constant::EMPTY_STR));
+        let user = Self::remove_property_str(self, "USER", h2_rust_constant::EMPTY_STR);
+        Self::set_user_name(self, user);
+
+        self.name = self.url[constant::START_URL.len()..].to_string();
+
+        Self::parse_name(self);
+
+        Self::convert_passwords(self)?;
+
+        Ok(())
+    }
+
+    fn get_format_exception(&self) -> DbError {
+        DbError::get(error_code::URL_FORMAT_ERROR_2, vec![engine_constant::URL_FORMAT, &self.url])
+    }
+
+    fn read_properties(&mut self, info: &Properties) -> Result<()> {
+        let db_settings = Self::get_db_settings(self)?;
+
+        for key in info.keys() {
+            let uppercase_key = key.to_uppercase();
+
+            if self.prop.contains_key(&uppercase_key) {
+                Err(DbError::get(error_code::DUPLICATE_PROPERTY_1, vec![&uppercase_key]))?;
+            }
+
+            let value = match info.get(key) {
+                Some(v) => v,
+                None => continue
+            };
+
+            if Self::is_known_setting(&uppercase_key) {
+                self.prop.insert(uppercase_key, value.to_string());
+                continue;
+            }
+
+            if db_settings.contains_key(&uppercase_key) {
+                self.prop.insert(uppercase_key, value.to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_known_setting(setting: &str) -> bool {
+        KNOWN_SETTINGS.contains(setting)
+    }
+
+    fn get_db_settings(&self) -> Result<DbSettings> {
+        let mut settings = HashMap::with_capacity(db_settings::TABLE_SIZE as usize);
+        for key in self.prop.keys() {
+            if !Self::is_known_setting(key) && db_settings::DEFAULT.contains_key(key) {
+                settings.insert(key.to_string(),
+                                self.prop.get(key).map_or_else(|| h2_rust_constant::EMPTY_STR.to_string(),
+                                                               |s| s.to_string()),
+                );
+            }
+        }
+
+        DbSettings::new(settings)
+    }
+
+    fn read_settings_from_url(&mut self) -> Result<()> {
+        let index = match self.url.find(h2_rust_constant::SEMI_COLUMN) {
+            Some(index) => index,
+            None => return Ok(())
+        };
+
+        let settings = self.url[index..].to_string();
+        self.url = self.url[0..index].to_string();
+
+        let mut unknown_setting = h2_rust_constant::EMPTY_STR.to_string();
+
+        for setting in settings.split(h2_rust_constant::SEMI_COLUMN) {
+            if setting.is_empty() {
+                continue;
+            }
+
+            let equal = match setting.find(h2_rust_constant::EQUAL) {
+                Some(index) => index,
+                None => throw!(Self::get_format_exception(self))
+            };
+
+            let key = setting[..equal].to_uppercase();
+            let value = &setting[equal + 1..];
+
+            if Self::is_known_setting(&key) || db_settings::DEFAULT.contains_key(&key) {
+                if let Some(old) = self.prop.get(&key) {
+                    if old.eq(value) {
+                        throw!(DbError::get(error_code::DUPLICATE_PROPERTY_1,vec![&key]));
+                    }
+                } else {
+                    self.prop.insert(key, value.to_string());
+                }
+            } else {
+                unknown_setting = key;
+            }
+        }
+
+        if !unknown_setting.is_empty() {
+            // 不能容忍未知的配置
+            if let Some(s) = self.prop.get("IGNORE_UNKNOWN_SETTINGS") {
+                if !utils::parse_bool(s, false, false)? {
+                    throw!(DbError::get(error_code::UNSUPPORTED_SETTING_1,vec![&unknown_setting]));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn remove_property_str(&mut self, key: &str, default_value: &str) -> String {
+        match self.prop.remove(key) {
+            Some(v) => v,
+            None => default_value.to_string()
+        }
+    }
+
+    fn remove_property_bool(&mut self, key: &str, default_value: bool) -> Result<bool> {
+        let s = Self::remove_property_str(self, key, h2_rust_constant::EMPTY_STR);
+        utils::parse_bool(&s, default_value, false)
+    }
+
+    pub fn set_user_name(&mut self, name: String) {
+        self.user = name.to_uppercase();
+    }
+
+    fn parse_name(&mut self) {
+        if h2_rust_constant::DOT.eq(&self.name) {
+            self.name = "mem:".to_string();
+        }
+
+        if self.name.starts_with("tcp:") {
+            self.remote = true;
+            self.name = self.name["tcp:".len()..].to_string();
+        } else if self.name.starts_with("ssl:") {
+            self.remote = true;
+            self.name = self.name["ssl:".len()..].to_string();
+        } else if self.name.starts_with("mem:") {
+            self.persistent = false;
+            if "mem:".eq(&self.name) {
+                self.unnamed = true;
+            }
+        } else if self.name.starts_with("file:") {
+            self.persistent = true;
+            self.name = self.name["file:".len()..].to_string();
+        } else {
+            self.persistent = true;
+        }
+
+        if self.persistent && !self.remote {
+            self.name = io_utils::name_separators_to_native(&self.name);
+        }
+    }
+
+    fn convert_passwords(&mut self) -> Result<()> {
+        let password = Self::remove_password(self);
+        let password_hash = Self::remove_property_bool(self, "PASSWORD_HASH", false)?;
+
+        self.user_password_hash = Self::hash_password(password_hash, &self.user, &password)?;
+
+        Ok(())
+    }
+
+    fn remove_password(&mut self) -> String {
+        if let Some(password) = self.prop.remove("PASSWORD") {
+            password
+        } else {
+            h2_rust_constant::EMPTY_STR.to_string()
+        }
+    }
+
+    fn hash_password(password_hash: bool, user_name: &str, password: &str) -> Result<Vec<u8>> {
+        if password_hash {
+            return string_utils::convert_hex_to_byte_vec(password);
+        }
+
+        if user_name.is_empty() && password.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        Ok(Vec::new())
     }
 }
 
@@ -41,10 +327,10 @@ mod test {
         use std::collections::HashMap;
         use crate::engine::connection_info::ConnectionInfo;
 
-        match ConnectionInfo::new(String::from("dasdasdasd"),
-                                  HashMap::<String, String>::new(),
+        match ConnectionInfo::new(String::from("jdbc:h2:file:./data/rust"),
+                                  &HashMap::<String, String>::new(),
                                   String::from("a"),
-                                  "a") {
+                                  String::from("a")) {
             Ok(_) => {}
             Err(e) => { println!("{}", e) }
         }
