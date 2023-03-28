@@ -211,9 +211,7 @@ pub fn get_type_name(index: usize) -> &'static str {
     TYPES.get(index).unwrap()
 }
 
-struct A {
-
-}
+struct A {}
 
 impl A {
     pub const AA: usize = 1;
