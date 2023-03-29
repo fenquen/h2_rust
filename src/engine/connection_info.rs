@@ -1,4 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::ops::Add;
+use std::path::Path;
 use std::sync::Once;
 use crate::engine::{constant as engine_constant, constant, db_settings};
 use anyhow::Result;
@@ -10,6 +13,7 @@ use crate::message::db_error::DbError;
 use crate::command::set_types;
 use crate::engine::db_settings::DbSettings;
 use crate::{h2_rust_common, throw};
+use crate::store::fs::file_utils;
 use crate::util::{io_utils, string_utils, utils};
 
 static COMMON_SETTINGS: [&str; 12] = [
@@ -69,6 +73,7 @@ lazy_static! {
     };
 }
 
+#[derive(Default)]
 pub struct ConnectionInfo {
     pub url: String,
     pub original_url: String,
@@ -76,6 +81,7 @@ pub struct ConnectionInfo {
     pub user: String,
     /// database name
     pub name: String,
+    pub name_normalized: String,
     pub persistent: bool,
     pub remote: bool,
     pub ssl: bool,
@@ -87,19 +93,8 @@ impl ConnectionInfo {
     pub fn new(url: String,
                info: &Properties,
                user: String,
-               password: String) -> Result<ConnectionInfo> {
-        let mut connection_info = ConnectionInfo {
-            url: Default::default(),
-            original_url: Default::default(),
-            prop: Default::default(),
-            user: Default::default(),
-            name: Default::default(),
-            persistent: false,
-            remote: false,
-            ssl: false,
-            unnamed: false,
-            user_password_hash: Default::default(),
-        };
+               password: String) -> Result<Self> {
+        let mut connection_info: ConnectionInfo = Default::default();
 
         connection_info.init(url, info, user, password)?;
 
@@ -245,14 +240,14 @@ impl ConnectionInfo {
         Ok(())
     }
 
-    fn remove_property_str(&mut self, key: &str, default_value: &str) -> String {
+    pub fn remove_property_str(&mut self, key: &str, default_value: &str) -> String {
         match self.prop.remove(key) {
             Some(v) => v,
             None => default_value.to_string()
         }
     }
 
-    fn remove_property_bool(&mut self, key: &str, default_value: bool) -> Result<bool> {
+    pub fn remove_property_bool(&mut self, key: &str, default_value: bool) -> Result<bool> {
         let s = Self::remove_property_str(self, key, h2_rust_constant::EMPTY_STR);
         utils::parse_bool(&s, default_value, false)
     }
@@ -316,6 +311,64 @@ impl ConnectionInfo {
         }
 
         Ok(Vec::new())
+    }
+
+    pub fn set_property(&mut self, key: &str, value: &str) {
+        if !value.is_empty() {
+            self.prop.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    pub fn get_property_bool(&self, key: &str, default_value: bool) -> Result<bool> {
+        let s = Self::get_property_string(self, key, h2_rust_constant::EMPTY_STR);
+        utils::parse_bool(key, false, false)
+    }
+
+    pub fn get_property_string(&self, key: &str, default_value: &str) -> String {
+        if let Some(s) = self.prop.get(key) {
+            s.to_string()
+        } else {
+            default_value.to_string()
+        }
+    }
+
+    pub fn get_property(&self, key: &str) -> Option<String> {
+        if let Some(s) = self.prop.get(key) {
+            Some(s.to_string())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_database_path(&mut self) -> Result<String> {
+        if !self.persistent {
+            return Ok(self.name.to_string());
+        }
+
+        if self.name_normalized.is_empty() {
+            if !file_utils::is_absolute("") &&
+                !self.name.contains("./") &&
+                !self.name.contains(".\\") &&
+                !self.name.contains(":/") &&
+                !self.name.contains(":\\") {
+                throw!(DbError::get(error_code::URL_RELATIVE_TO_CWD,vec![&self.original_url]));
+            }
+
+            let real = file_utils::to_real_path(&self.name.clone().add(constant::SUFFIX_MV_FILE))?;
+            let file_name = file_utils::get_name(&real);
+
+            if file_name.len() < constant::SUFFIX_MV_FILE.len() + 1 {
+                throw!(DbError::get(error_code::INVALID_DATABASE_NAME_1,vec![&self.name]));
+            }
+
+            if let Ok(real) = real.into_os_string().into_string() {
+                self.name_normalized = real[..real.len() - constant::SUFFIX_MV_FILE.len()].to_string();
+            } else {
+                throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["real.into_os_string().into_string()"]));
+            }
+        }
+
+        Ok(self.name_normalized.to_string())
     }
 }
 

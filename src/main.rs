@@ -9,6 +9,7 @@ mod message;
 mod api;
 mod command;
 mod util;
+mod store;
 
 fn main() {
     println!("Hello, world!");
