@@ -28,6 +28,10 @@ impl DbError {
         Self::get(error_code::GENERAL_ERROR_1, vec![s])
     }
 
+    pub fn get_unsupported_exception(s: &str) -> DbError {
+        Self::get(error_code::FEATURE_NOT_SUPPORTED_1, vec![s])
+    }
+
     pub fn get(error_code: Integer, params: Vec<&str>) -> DbError {
         // error_code对应的文本
         let sql_state = error_code::get_state(error_code);

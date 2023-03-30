@@ -74,7 +74,35 @@ pub fn test_translate() {
 }
 
 #[test]
-fn string_int (){
-    let a = u64::from_str_radix("-aa",16).unwrap();
+fn string_int() {
+    let a = u64::from_str_radix("-aa", 16).unwrap();
+}
 
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
+use std::sync::Arc;
+
+fn check<T: BorrowMut<[i32]>>(mut v: T) {
+    assert_eq!(&mut [1, 2, 3], v.borrow_mut());
+}
+
+fn main() {
+    let mut v = vec![1, 2, 3];
+
+    assert_eq!(
+        &mut [1, 2, 3],
+        <Vec<i32> as BorrowMut<[i32]>>::borrow_mut(&mut v)
+    );
+
+    check(v);
+}
+
+#[test]
+fn test_arc_mut() {
+    struct User {
+        salary: u8,
+    }
+
+    let a = Arc::new(RefCell::new(User { salary: 1 }));
+    (&*a).borrow_mut().salary = 100;
 }

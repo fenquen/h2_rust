@@ -47,7 +47,7 @@ fn open_session1(connection_info: &mut ConnectionInfo,
 
     let database_path = connection_info.get_database_path()?;
 
-    let database_holder = if connection_info.unnamed {
+    let database_holder = if connection_info.unnamed_in_memory {
         Arc::new(DatabaseHolder::new())
     } else {
         let mutex_guard = DATABASE_PATH_DATABASE_HOLDER.lock().unwrap();
@@ -101,6 +101,7 @@ fn open_session1(connection_info: &mut ConnectionInfo,
             } else {
                 throw_not_found(if_exist, force_creation, &database_path)?;
             }
+            
         }
     }
 

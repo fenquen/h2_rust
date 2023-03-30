@@ -17,7 +17,6 @@ lazy_static! {
             r[a + 97] = (a + 10) as Integer;
             r[a + 65] = (a + 10) as Integer;
         }
-
         r
      };
 }
@@ -49,6 +48,22 @@ pub fn convert_hex_to_byte_vec(s: &str) -> Result<Vec<u8>> {
     }
 
     Ok(buff)
+}
+
+pub fn to_upper_english(s: &str) -> String {
+    s.to_uppercase()
+}
+
+pub fn to_lower_english(s: &str) -> String {
+    s.to_lowercase()
+}
+
+pub fn truncate_string(s: &str, max_length: usize) -> String {
+    if s.len() > max_length {
+        (&s[..max_length]).to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 mod test {

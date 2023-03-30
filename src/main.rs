@@ -10,6 +10,7 @@ mod api;
 mod command;
 mod util;
 mod store;
+mod mode;
 
 fn main() {
     println!("Hello, world!");

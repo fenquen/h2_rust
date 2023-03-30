@@ -16,8 +16,8 @@ lazy_static! {
 
 pub struct DbSettings {
     settings: HashMap<String, String>,
-    database_to_upper: bool,
-    database_to_lower: bool,
+    pub database_to_upper: bool,
+    pub database_to_lower: bool,
 }
 
 impl DbSettings {

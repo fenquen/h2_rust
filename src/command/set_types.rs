@@ -2,146 +2,147 @@ use std::collections::HashSet;
 use std::mem;
 use std::ops::Index;
 use lazy_static::lazy_static;
+use crate::h2_rust_common::Integer;
 
 /// The type of a SET IGNORECASE statement.
-pub const IGNORECASE: i32 = 0;
+pub const IGNORECASE: Integer = 0;
 
 /// The type of a SET MAX_LOG_SIZE statement.
-pub const MAX_LOG_SIZE: i32 = IGNORECASE + 1;
+pub const MAX_LOG_SIZE: Integer = IGNORECASE + 1;
 
 /// The type of a SET MODE statement.
-pub const MODE: i32 = MAX_LOG_SIZE + 1;
+pub const MODE: Integer = MAX_LOG_SIZE + 1;
 
 /// The type of a SET READONLY statement.
-pub const READONLY: i32 = MODE + 1;
+pub const READONLY: Integer = MODE + 1;
 
 /// The type of a SET LOCK_TIMEOUT statement.
-pub const LOCK_TIMEOUT: i32 = READONLY + 1;
+pub const LOCK_TIMEOUT: Integer = READONLY + 1;
 
 /// The type of a SET DEFAULT_LOCK_TIMEOUT statement.
-pub const DEFAULT_LOCK_TIMEOUT: i32 = LOCK_TIMEOUT + 1;
+pub const DEFAULT_LOCK_TIMEOUT: Integer = LOCK_TIMEOUT + 1;
 
 /// The type of a SET DEFAULT_TABLE_TYPE statement.
-pub const DEFAULT_TABLE_TYPE: i32 = DEFAULT_LOCK_TIMEOUT + 1;
+pub const DEFAULT_TABLE_TYPE: Integer = DEFAULT_LOCK_TIMEOUT + 1;
 
 /// The type of a SET CACHE_SIZE statement.
-pub const CACHE_SIZE: i32 = DEFAULT_TABLE_TYPE + 1;
+pub const CACHE_SIZE: Integer = DEFAULT_TABLE_TYPE + 1;
 
 /// The type of a SET TRACE_LEVEL_SYSTEM_OUT statement.
-pub const TRACE_LEVEL_SYSTEM_OUT: i32 = CACHE_SIZE + 1;
+pub const TRACE_LEVEL_SYSTEM_OUT: Integer = CACHE_SIZE + 1;
 
 /// The type of a SET TRACE_LEVEL_FILE statement.
-pub const TRACE_LEVEL_FILE: i32 = TRACE_LEVEL_SYSTEM_OUT + 1;
+pub const TRACE_LEVEL_FILE: Integer = TRACE_LEVEL_SYSTEM_OUT + 1;
 
 /// The type of a SET TRACE_MAX_FILE_SIZE statement.
-pub const TRACE_MAX_FILE_SIZE: i32 = TRACE_LEVEL_FILE + 1;
+pub const TRACE_MAX_FILE_SIZE: Integer = TRACE_LEVEL_FILE + 1;
 
 /// The type of a SET COLLATION  statement.
-pub const COLLATION: i32 = TRACE_MAX_FILE_SIZE + 1;
+pub const COLLATION: Integer = TRACE_MAX_FILE_SIZE + 1;
 
 /// The type of a SET CLUSTER statement.
-pub const CLUSTER: i32 = COLLATION + 1;
+pub const CLUSTER: Integer = COLLATION + 1;
 
 /// The type of a SET WRITE_DELAY statement.
-pub const WRITE_DELAY: i32 = CLUSTER + 1;
+pub const WRITE_DELAY: Integer = CLUSTER + 1;
 
 /// The type of a SET DATABASE_EVENT_LISTENER statement.
-pub const DATABASE_EVENT_LISTENER: i32 = WRITE_DELAY + 1;
+pub const DATABASE_EVENT_LISTENER: Integer = WRITE_DELAY + 1;
 
 /// The type of a SET MAX_MEMORY_ROWS statement.
-pub const MAX_MEMORY_ROWS: i32 = DATABASE_EVENT_LISTENER + 1;
+pub const MAX_MEMORY_ROWS: Integer = DATABASE_EVENT_LISTENER + 1;
 
 /// The type of a SET LOCK_MODE statement.
-pub const LOCK_MODE: i32 = MAX_MEMORY_ROWS + 1;
+pub const LOCK_MODE: Integer = MAX_MEMORY_ROWS + 1;
 
 /// The type of a SET DB_CLOSE_DELAY statement.
-pub const DB_CLOSE_DELAY: i32 = LOCK_MODE + 1;
+pub const DB_CLOSE_DELAY: Integer = LOCK_MODE + 1;
 
 /// The type of a SET THROTTLE statement.
-pub const THROTTLE: i32 = DB_CLOSE_DELAY + 1;
+pub const THROTTLE: Integer = DB_CLOSE_DELAY + 1;
 
 /// The type of a SET MAX_MEMORY_UNDO statement.
-pub const MAX_MEMORY_UNDO: i32 = THROTTLE + 1;
+pub const MAX_MEMORY_UNDO: Integer = THROTTLE + 1;
 
 /// The type of a SET MAX_LENGTH_INPLACE_LOB statement.
-pub const MAX_LENGTH_INPLACE_LOB: i32 = MAX_MEMORY_UNDO + 1;
+pub const MAX_LENGTH_INPLACE_LOB: Integer = MAX_MEMORY_UNDO + 1;
 
 /// The type of a SET ALLOW_LITERALS statement.
-pub const ALLOW_LITERALS: i32 = MAX_LENGTH_INPLACE_LOB + 1;
+pub const ALLOW_LITERALS: Integer = MAX_LENGTH_INPLACE_LOB + 1;
 
 /// The type of a SET SCHEMA statement.
-pub const SCHEMA: i32 = ALLOW_LITERALS + 1;
+pub const SCHEMA: Integer = ALLOW_LITERALS + 1;
 
 /// The type of a SET OPTIMIZE_REUSE_RESULTS statement.
-pub const OPTIMIZE_REUSE_RESULTS: i32 = SCHEMA + 1;
+pub const OPTIMIZE_REUSE_RESULTS: Integer = SCHEMA + 1;
 
 /// The type of a SET SCHEMA_SEARCH_PATH statement.
-pub const SCHEMA_SEARCH_PATH: i32 = OPTIMIZE_REUSE_RESULTS + 1;
+pub const SCHEMA_SEARCH_PATH: Integer = OPTIMIZE_REUSE_RESULTS + 1;
 
 /// The type of a SET REFERENTIAL_INTEGRITY statement.
-pub const REFERENTIAL_INTEGRITY: i32 = SCHEMA_SEARCH_PATH + 1;
+pub const REFERENTIAL_INTEGRITY: Integer = SCHEMA_SEARCH_PATH + 1;
 
 /// The type of a SET MAX_OPERATION_MEMORY statement.
-pub const MAX_OPERATION_MEMORY: i32 = REFERENTIAL_INTEGRITY + 1;
+pub const MAX_OPERATION_MEMORY: Integer = REFERENTIAL_INTEGRITY + 1;
 
 /// The type of a SET EXCLUSIVE statement.
-pub const EXCLUSIVE: i32 = MAX_OPERATION_MEMORY + 1;
+pub const EXCLUSIVE: Integer = MAX_OPERATION_MEMORY + 1;
 
 /// The type of a SET CREATE_BUILD statement.
-pub const CREATE_BUILD: i32 = EXCLUSIVE + 1;
+pub const CREATE_BUILD: Integer = EXCLUSIVE + 1;
 
 /// The type of a SET \@VARIABLE statement.
-pub const VARIABLE: i32 = CREATE_BUILD + 1;
+pub const VARIABLE: Integer = CREATE_BUILD + 1;
 
 /// The type of a SET QUERY_TIMEOUT statement.
-pub const QUERY_TIMEOUT: i32 = VARIABLE + 1;
+pub const QUERY_TIMEOUT: Integer = VARIABLE + 1;
 
 /// The type of a SET REDO_LOG_BINARY statement.
-pub const REDO_LOG_BINARY: i32 = QUERY_TIMEOUT + 1;
+pub const REDO_LOG_BINARY: Integer = QUERY_TIMEOUT + 1;
 
 /// The type of a SET JAVA_OBJECT_SERIALIZER statement.
-pub const JAVA_OBJECT_SERIALIZER: i32 = REDO_LOG_BINARY + 1;
+pub const JAVA_OBJECT_SERIALIZER: Integer = REDO_LOG_BINARY + 1;
 
 /// The type of a SET RETENTION_TIME statement.
-pub const RETENTION_TIME: i32 = JAVA_OBJECT_SERIALIZER + 1;
+pub const RETENTION_TIME: Integer = JAVA_OBJECT_SERIALIZER + 1;
 
 /// The type of a SET QUERY_STATISTICS statement.
-pub const QUERY_STATISTICS: i32 = RETENTION_TIME + 1;
+pub const QUERY_STATISTICS: Integer = RETENTION_TIME + 1;
 
 /// The type of a SET QUERY_STATISTICS_MAX_ENTRIES statement.
-pub const QUERY_STATISTICS_MAX_ENTRIES: i32 = QUERY_STATISTICS + 1;
+pub const QUERY_STATISTICS_MAX_ENTRIES: Integer = QUERY_STATISTICS + 1;
 
 /// The type of SET LAZY_QUERY_EXECUTION statement.
-pub const LAZY_QUERY_EXECUTION: i32 = QUERY_STATISTICS_MAX_ENTRIES + 1;
+pub const LAZY_QUERY_EXECUTION: Integer = QUERY_STATISTICS_MAX_ENTRIES + 1;
 
 /// The type of SET BUILTIN_ALIAS_OVERRIDE statement.
-pub const BUILTIN_ALIAS_OVERRIDE: i32 = LAZY_QUERY_EXECUTION + 1;
+pub const BUILTIN_ALIAS_OVERRIDE: Integer = LAZY_QUERY_EXECUTION + 1;
 
 /// The type of a SET AUTHENTICATOR statement.
-pub const AUTHENTICATOR: i32 = BUILTIN_ALIAS_OVERRIDE + 1;
+pub const AUTHENTICATOR: Integer = BUILTIN_ALIAS_OVERRIDE + 1;
 
 /// The type of a SET IGNORE_CATALOGS statement.
-pub const IGNORE_CATALOGS: i32 = AUTHENTICATOR + 1;
+pub const IGNORE_CATALOGS: Integer = AUTHENTICATOR + 1;
 
 /// The type of a SET CATALOG statement.
-pub const CATALOG: i32 = IGNORE_CATALOGS + 1;
+pub const CATALOG: Integer = IGNORE_CATALOGS + 1;
 
 /// The type of a SET NON_KEYWORDS statement.
-pub const NON_KEYWORDS: i32 = CATALOG + 1;
+pub const NON_KEYWORDS: Integer = CATALOG + 1;
 
 /// The type of a SET TIME ZONE statement.
-pub const TIME_ZONE: i32 = NON_KEYWORDS + 1;
+pub const TIME_ZONE: Integer = NON_KEYWORDS + 1;
 
 /// The type of a SET VARIABLE_BINARY statement.
-pub const VARIABLE_BINARY: i32 = TIME_ZONE + 1;
+pub const VARIABLE_BINARY: Integer = TIME_ZONE + 1;
 
 /// The type of a SET DEFAULT_NULL_ORDERING statement.
-pub const DEFAULT_NULL_ORDERING: i32 = VARIABLE_BINARY + 1;
+pub const DEFAULT_NULL_ORDERING: Integer = VARIABLE_BINARY + 1;
 
 /// The type of a SET TRUNCATE_LARGE_LENGTH statement.
-pub const TRUNCATE_LARGE_LENGTH: i32 = DEFAULT_NULL_ORDERING + 1;
+pub const TRUNCATE_LARGE_LENGTH: Integer = DEFAULT_NULL_ORDERING + 1;
 
-const COUNT: i32 = TRUNCATE_LARGE_LENGTH + 1;
+const COUNT: Integer = TRUNCATE_LARGE_LENGTH + 1;
 
 lazy_static! {
     pub static ref TYPES: Vec<&'static str> = {

@@ -2,17 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::ops::Add;
 use std::path::Path;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use crate::engine::{constant as engine_constant, constant, db_settings};
 use anyhow::Result;
 use lazy_static::lazy_static;
 use toml::value::Index;
 use crate::api::error_code;
-use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant};
+use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant, Integer, Nullable};
 use crate::message::db_error::DbError;
 use crate::command::set_types;
 use crate::engine::db_settings::DbSettings;
 use crate::{h2_rust_common, throw};
+use crate::h2_rust_common::Nullable::NotNull;
 use crate::store::fs::file_utils;
 use crate::util::{io_utils, string_utils, utils};
 
@@ -85,8 +86,9 @@ pub struct ConnectionInfo {
     pub persistent: bool,
     pub remote: bool,
     pub ssl: bool,
-    pub unnamed: bool,
-    pub user_password_hash: Vec<u8>,
+    pub unnamed_in_memory: bool,
+    pub user_password_hash: Arc<Nullable<Vec<u8>>>,
+    pub file_password_hash: Arc<Nullable<Vec<u8>>>,
 }
 
 impl ConnectionInfo {
@@ -177,7 +179,7 @@ impl ConnectionInfo {
         KNOWN_SETTINGS.contains(setting)
     }
 
-    fn get_db_settings(&self) -> Result<DbSettings> {
+    pub fn get_db_settings(&self) -> Result<DbSettings> {
         let mut settings = HashMap::with_capacity(db_settings::TABLE_SIZE as usize);
         for key in self.prop.keys() {
             if !Self::is_known_setting(key) && db_settings::DEFAULT.contains_key(key) {
@@ -270,7 +272,7 @@ impl ConnectionInfo {
         } else if self.name.starts_with("mem:") {
             self.persistent = false;
             if "mem:".eq(&self.name) {
-                self.unnamed = true;
+                self.unnamed_in_memory = true;
             }
         } else if self.name.starts_with("file:") {
             self.persistent = true;
@@ -288,7 +290,7 @@ impl ConnectionInfo {
         let password = Self::remove_password(self);
         let password_hash = Self::remove_property_bool(self, "PASSWORD_HASH", false)?;
 
-        self.user_password_hash = Self::hash_password(password_hash, &self.user, &password)?;
+        self.user_password_hash = Arc::new(NotNull(Self::hash_password(password_hash, &self.user, &password)?));
 
         Ok(())
     }
@@ -324,9 +326,18 @@ impl ConnectionInfo {
         utils::parse_bool(key, false, false)
     }
 
+    pub fn get_property_int(&self, key: &str, default_value: Integer) -> Result<Integer> {
+        if let Some(s) = Self::get_property(&self, key) {
+            let a = Integer::from_str_radix(&s, 10)?;
+            Ok(a)
+        } else {
+            Ok(default_value)
+        }
+    }
+
     pub fn get_property_string(&self, key: &str, default_value: &str) -> String {
-        if let Some(s) = self.prop.get(key) {
-            s.to_string()
+        if let Some(s) = Self::get_property(&self, key) {
+            s
         } else {
             default_value.to_string()
         }
