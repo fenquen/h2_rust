@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem::transmute;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use crate::api::error_code;
@@ -14,20 +15,21 @@ lazy_static! {
     } ;
 }
 
+#[derive(Default)]
 pub struct DbSettings {
     settings: HashMap<String, String>,
     pub database_to_upper: bool,
     pub database_to_lower: bool,
+    pub db_close_on_exit: bool,
+    pub ignore_catalogs: bool,
+    pub mv_store: bool,
 }
 
 impl DbSettings {
     pub fn new(settings: HashMap<String, String>) -> Result<DbSettings> {
-        let mut db_settings = DbSettings {
-            settings,
-            database_to_upper: false,
-            database_to_lower: false,
-        };
+        let mut db_settings = DbSettings::default();
 
+        db_settings.settings = settings;
         db_settings.init()?;
 
         Ok(db_settings)
@@ -50,6 +52,11 @@ impl DbSettings {
 
         self.settings.insert("DATABASE_TO_LOWER".to_string(), lower.to_string());
         self.settings.insert("DATABASE_TO_UPPER".to_string(), upper.to_string());
+
+        self.db_close_on_exit = Self::get_bool(self, "DB_CLOSE_ON_EXIT", true)?;
+        self.ignore_catalogs = Self::get_bool(self, "IGNORE_CATALOGS", false)?;
+
+        self.mv_store = Self::get_bool(self, "MV_STORE", true)?;
 
         Ok(())
     }

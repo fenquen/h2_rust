@@ -13,6 +13,9 @@ pub mod h2_rust_constant;
 pub type Properties = HashMap<String, String>;
 pub type Integer = i32;
 
+pub type Long = i64;
+pub type Byte = i8;
+
 pub fn throw<T, E: Error + Send + Sync + 'static>(e: E) -> Result<T> {
     core::result::Result::Err(e)?
 }
@@ -24,6 +27,13 @@ pub enum Nullable<T> {
 
 impl<T> Nullable<T> {
     pub fn unwrap(&self) -> &T {
+        match self {
+            NotNull(t) => t,
+            Null => panic!("null")
+        }
+    }
+
+    pub fn unwrap_mut(&mut self) -> &mut T {
         match self {
             NotNull(t) => t,
             Null => panic!("null")

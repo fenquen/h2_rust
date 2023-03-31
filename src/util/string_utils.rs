@@ -17,6 +17,7 @@ lazy_static! {
             r[a + 97] = (a + 10) as Integer;
             r[a + 65] = (a + 10) as Integer;
         }
+
         r
      };
 }

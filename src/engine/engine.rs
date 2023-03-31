@@ -10,13 +10,14 @@ use crate::engine::connection_info::ConnectionInfo;
 use crate::engine::constant;
 use crate::engine::database::Database;
 use crate::engine::session_local::SessionLocal;
-use crate::h2_rust_common::h2_rust_constant;
+use crate::h2_rust_common::{h2_rust_constant, Nullable};
+use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 use crate::store::fs::file_utils;
 use crate::throw;
 
 lazy_static! {
-    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<RefCell<HashMap<String,Arc<DatabaseHolder>>>> = Mutex::new(RefCell::new(HashMap::new()));
+    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<Nullable<DatabaseHolder>>>> = Mutex::new(HashMap::new());
 }
 
 pub fn create_session(connection_info: &mut ConnectionInfo) -> Result<SessionLocal> {
@@ -48,23 +49,23 @@ fn open_session1(connection_info: &mut ConnectionInfo,
     let database_path = connection_info.get_database_path()?;
 
     let database_holder = if connection_info.unnamed_in_memory {
-        Arc::new(DatabaseHolder::new())
+        Arc::new(NotNull(DatabaseHolder::new()))
     } else {
-        let mutex_guard = DATABASE_PATH_DATABASE_HOLDER.lock().unwrap();
-        let mut r = mutex_guard.borrow_mut();
+        let mut mutex_guard = DATABASE_PATH_DATABASE_HOLDER.lock().unwrap();
+        // let mut r = mutex_guard.borrow_mut();
 
-        if !r.contains_key(&database_path) {
-            let database_holder = Arc::new(DatabaseHolder::new());
-            r.insert(database_path.to_string(), database_holder.clone());
+        if !mutex_guard.contains_key(&database_path) {
+            let database_holder = Arc::new(NotNull(DatabaseHolder::new()));
+            mutex_guard.insert(database_path.to_string(), database_holder.clone()); //
             database_holder
         } else {
-            r.get(&database_path).unwrap().clone()
+            mutex_guard.get(&database_path).unwrap().clone()
         }
     };
 
     {
-        database_holder.mutex.lock().unwrap();
-        if database_holder.database.is_none() || open_new {
+        let guard = database_holder.unwrap().database.lock().unwrap();
+        if guard.is_null() || open_new {
             if connection_info.persistent {
                 let value = connection_info.get_property("MV_STORE");
                 let mut file_name = database_path.clone().add(constant::SUFFIX_MV_FILE);
@@ -101,7 +102,6 @@ fn open_session1(connection_info: &mut ConnectionInfo,
             } else {
                 throw_not_found(if_exist, force_creation, &database_path)?;
             }
-            
         }
     }
 
@@ -119,15 +119,13 @@ fn throw_not_found(if_exist: bool, forbid_creation: bool, name: &str) -> Result<
 }
 
 struct DatabaseHolder {
-    mutex: Mutex<()>,
-    database: Arc<Option<Database>>,
+    database: Arc<Mutex<Nullable<Database>>>,
 }
 
 impl DatabaseHolder {
     pub fn new() -> DatabaseHolder {
         DatabaseHolder {
-            mutex: Mutex::new(()),
-            database: Arc::new(None),
+            database: Arc::new(Mutex::new(Null)),
         }
     }
 }

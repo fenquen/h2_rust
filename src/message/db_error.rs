@@ -24,15 +24,15 @@ pub struct DbError {
 }
 
 impl DbError {
-    pub fn get_internal_error(s: &str) -> DbError {
+    pub fn get_internal_error(s: &str) -> Self {
         Self::get(error_code::GENERAL_ERROR_1, vec![s])
     }
 
-    pub fn get_unsupported_exception(s: &str) -> DbError {
+    pub fn get_unsupported_exception(s: &str) -> Self {
         Self::get(error_code::FEATURE_NOT_SUPPORTED_1, vec![s])
     }
 
-    pub fn get(error_code: Integer, params: Vec<&str>) -> DbError {
+    pub fn get(error_code: Integer, params: Vec<&str>) -> Self {
         // error_code对应的文本
         let sql_state = error_code::get_state(error_code);
         let message = Self::translate(&sql_state, params);
@@ -59,6 +59,10 @@ impl DbError {
 
         message
     }
+
+    pub fn get_invalid_value_exception(param: &str, value: &impl AsRef<str>) -> Self {
+        Self::get(error_code::INVALID_VALUE_2, vec![value.as_ref(), param])
+    }
 }
 
 impl Display for DbError {
@@ -78,5 +82,12 @@ mod test {
     fn test_translate() {
         use crate::message::db_error;
         println!("{}", DbError::translate("07001", vec!["a", "a"]));
+    }
+
+    #[test]
+    fn test_get_invalid_value_exception(){
+        let s = "1".to_string();
+        DbError::get_invalid_value_exception("a",&s);
+        let a = &s;
     }
 }

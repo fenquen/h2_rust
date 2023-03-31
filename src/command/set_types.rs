@@ -212,16 +212,6 @@ pub fn get_type_name(index: usize) -> &'static str {
     TYPES.get(index).unwrap()
 }
 
-struct A {}
-
-impl A {
-    pub const AA: usize = 1;
-
-    pub fn show() {
-        println!("{}", A::AA);
-    }
-}
-
 mod test {
     use std::ops::Index;
     use crate::command::set_types::{get_type, get_types, TYPES};

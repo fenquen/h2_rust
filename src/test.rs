@@ -80,7 +80,10 @@ fn string_int() {
 
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use crate::h2_rust_common::Nullable;
+use crate::h2_rust_common::Nullable::NotNull;
 
 fn check<T: BorrowMut<[i32]>>(mut v: T) {
     assert_eq!(&mut [1, 2, 3], v.borrow_mut());
@@ -105,4 +108,26 @@ fn test_arc_mut() {
 
     let a = Arc::new(RefCell::new(User { salary: 1 }));
     (&*a).borrow_mut().salary = 100;
+
+    let b = Mutex::new(User { salary: 1 });
+    b.lock().unwrap().salary = 100;
+}
+
+#[test]
+fn test_multi_thread_refcell() {
+    struct Company {
+        level: i64,
+    }
+
+    struct User {
+        salary: u64,
+        company: Arc<RefCell<Nullable<Company>>>,
+    }
+
+    let a = Arc::new(Mutex::new(User { salary: 1, company: Arc::new(RefCell::new(NotNull(Company { level: 2 }))) }));
+    let b = a.clone();
+
+    thread::spawn(move || {
+        println!("{}", b.lock().unwrap().salary);
+    });
 }

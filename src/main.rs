@@ -11,6 +11,7 @@ mod command;
 mod util;
 mod store;
 mod mode;
+mod result;
 
 fn main() {
     println!("Hello, world!");
