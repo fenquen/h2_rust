@@ -63,6 +63,7 @@ pub fn test_translate() {
 
     let mut d = 1;
     let d1 = &mut d;
+
     fn consume(d2: &mut i32) {
         *d2 = 2;
     }
@@ -80,8 +81,12 @@ fn string_int() {
 
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
+use atomic_refcell::AtomicRefCell;
+use crossbeam::atomic::AtomicCell;
 use crate::h2_rust_common::Nullable;
 use crate::h2_rust_common::Nullable::NotNull;
 
@@ -100,6 +105,16 @@ fn main() {
     check(v);
 }
 
+#[derive(Default)]
+struct Company {
+    pub level: i64,
+}
+
+struct User {
+    salary: u64,
+    company: Arc<Nullable<Company>>,
+}
+
 #[test]
 fn test_arc_mut() {
     struct User {
@@ -115,19 +130,58 @@ fn test_arc_mut() {
 
 #[test]
 fn test_multi_thread_refcell() {
-    struct Company {
-        level: i64,
-    }
-
-    struct User {
-        salary: u64,
-        company: Arc<RefCell<Nullable<Company>>>,
-    }
-
-    let a = Arc::new(Mutex::new(User { salary: 1, company: Arc::new(RefCell::new(NotNull(Company { level: 2 }))) }));
+    /*let a = Arc::new(Mutex::new(User { salary: 1, company: Arc::new(RefCell::new(NotNull(Company { level: 2 }))) }));
     let b = a.clone();
 
     thread::spawn(move || {
         println!("{}", b.lock().unwrap().salary);
-    });
+    });*/
+
+    let box_ = Box::new(Company { level: 1 });
+
+    let a = &*box_;
+    let d = Box::into_raw(box_);
+    let dd = d as usize;
+    unsafe { (*d).level = 1000; }
+
+    thread::spawn(move || {
+        let dd = dd as *mut Company;
+        unsafe { (*dd).level = 10000 }
+    }).join().unwrap();
+
+    println!("{}", unsafe { (*d).level });
+}
+
+#[test]
+fn test_crossbeam() {
+    let mut a = Arc::new(AtomicCell::new(Company { level: 1 }));
+    let aa = a.clone();
+
+    thread::spawn(move || {
+        let s = aa.as_ptr();
+        unsafe { (*s).level = 100 }
+    }).join().unwrap();
+
+    println!("{}", unsafe { (*(a.as_ptr())).level })
+}
+
+#[test]
+fn test_atomic_refcell() {
+    fn change_a(this: Arc<AtomicRefCell<Nullable<Company>>>) {
+        let mut binding = (&*this).borrow_mut();
+        let company = binding.unwrap_mut();
+    }
+
+    let a = Arc::new(AtomicRefCell::new(NotNull(Company::default())));
+    let aa = a.clone();
+
+    let mut binding = (&*a).borrow_mut();
+    let company = binding.unwrap_mut();
+    company.level = 9;
+
+    drop(binding);
+    change_a(aa);
+    let mut binding = (&*a).borrow_mut();
+    let company = binding.unwrap_mut();
+    company.level = 19;
 }

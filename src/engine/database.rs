@@ -6,10 +6,11 @@ use std::sync::atomic::AtomicBool;
 use crate::engine::connection_info::ConnectionInfo;
 use crate::engine::db_settings::DbSettings;
 use anyhow::Result;
+use atomic_refcell::AtomicRefCell;
 use crate::api::error_code;
 use crate::engine::{constant, database};
 use crate::engine::mode::Mode;
-use crate::h2_rust_common::{h2_rust_constant, Integer, Nullable};
+use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::message::db_error::DbError;
 use crate::mode::default_null_ordering::DefaultNullOrdering;
@@ -44,15 +45,18 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) {
+    pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<()> {
         let database: Database = Default::default();
-        let this = Arc::new(RefCell::new(NotNull(database)));
-        Self::init(this, connection_info, cipher);
+        let this = Arc::new(AtomicRefCell::new(NotNull(database)));
+        Self::init(this, connection_info, cipher)?;
+        Ok(())
     }
 
-    fn init(this: Arc<RefCell<Nullable<Database>>>, connection_info: &mut ConnectionInfo, cipher: &String) -> Result<()> {
-        let mut binding = this.borrow_mut();
-        let database = binding.unwrap_mut();
+    fn init(this: Arc<AtomicRefCell<Nullable<Database>>>,
+            connection_info: &mut ConnectionInfo,
+            cipher: &String) -> Result<()> {
+        let mut atomic_ref_mut = (&*this).borrow_mut();
+        let database = atomic_ref_mut.unwrap_mut();
 
         database.db_settings = connection_info.get_db_settings()?;
         database.persistent = connection_info.persistent;
@@ -65,7 +69,8 @@ impl Database {
         database.auto_server_port = connection_info.get_property_int("AUTO_SERVER_PORT", 0)?;
         database.page_size = connection_info.get_property_int("PAGE_SIZE", constant::DEFAULT_PAGE_SIZE)?;
 
-        database.database_short_name = Self::parse_database_short_name(this.clone());
+        // database.database_short_name = Self::parse_database_short_name(this.clone());
+        database.database_short_name = database.parse_database_short_name();
 
         if !database.cipher.is_empty() && database.page_size % file_encrypt::BLOCK_SIZE != 0 {
             throw!( DbError::get_unsupported_exception(&format!("CIPHER && PAGE_SIZE={}",  database.page_size)));
@@ -144,7 +149,8 @@ impl Database {
                     }*/
                 }
 
-                Self::delete_old_temp_files(this.clone())?;
+                // Self::delete_old_temp_files(this.clone())?;
+                database.delete_old_temp_files()?;
             }
 
             database.starting = AtomicBool::new(true);
@@ -159,11 +165,12 @@ impl Database {
         Ok(())
     }
 
-    fn parse_database_short_name(this: Arc<RefCell<Nullable<Database>>>) -> String {
-        let mut binding = this.borrow_mut();
-        let database = binding.unwrap_mut();
+    // this: Arc<AtomicRefCell<Nullable<Database>>>
+    fn parse_database_short_name(&self) -> String {
+        //  let binding = (&*this).borrow_mut();
+        //  let database = binding.unwrap();
 
-        let database_path = &database.database_path;
+        let database_path = &self.database_path;
         let len = database_path.len();
 
         let a =
@@ -182,10 +189,10 @@ impl Database {
             };
 
         let database_path =
-            if database.db_settings.database_to_upper {
+            if self.db_settings.database_to_upper {
                 string_utils::to_upper_english(database_path)
             } else {
-                if database.db_settings.database_to_lower {
+                if self.db_settings.database_to_lower {
                     string_utils::to_lower_english(database_path)
                 } else {
                     database_path.to_string()
@@ -195,18 +202,32 @@ impl Database {
         string_utils::truncate_string(&database_path, constant::MAX_IDENTIFIER_LENGTH as usize)
     }
 
-    fn delete_old_temp_files(this: Arc<RefCell<Nullable<Database>>>) -> Result<()> {
-        let mut binding = this.borrow_mut();
-        let database = binding.unwrap_mut();
 
-        let parent_dir_path = file_utils::get_parent(&database.database_path)?;
+    // this: Arc<AtomicRefCell<Nullable<Database>>>
+    fn delete_old_temp_files(&self) -> Result<()> {
+        // let binding = (&*this).borrow_mut();
+        // let database = binding.unwrap();
+
+        let parent_dir_path = file_utils::get_parent(&self.database_path)?;
 
         for path in file_utils::new_directory_stream(parent_dir_path)? {
-            if path.ends_with(constant::SUFFIX_TEMP_FILE) && path.starts_with(&database.database_path) {
+            if path.ends_with(constant::SUFFIX_TEMP_FILE) && path.starts_with(&self.database_path) {
                 file_utils::try_delete(&path);
             }
         }
 
         Ok(())
+    }
+
+    pub fn get_database_path(&self) -> Result<String> {
+        if self.persistent {
+            if let Ok(s) = file_utils::to_real_path(&self.database_path)?.into_os_string().into_string() {
+                Ok(s)
+            } else {
+                throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["Database::get_database_path()"]))
+            }
+        } else {
+            Ok(h2_rust_constant::EMPTY_STR.to_string())
+        }
     }
 }

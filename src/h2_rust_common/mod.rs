@@ -63,3 +63,20 @@ impl<T> From<Option<T>> for Nullable<T> {
         }
     }
 }
+
+
+pub enum Nullable1<T> {
+    NotNull(Box<T>),
+    Null,
+}
+
+impl<T> Nullable1<T> {
+    pub fn unwrap_mut(&self) {
+        match self {
+            Nullable1::NotNull(b) => {
+
+            }
+            Nullable1::Null => panic!("null")
+        }
+    }
+}

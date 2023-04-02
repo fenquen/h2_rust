@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use crate::api::error_code;
 use crate::message::db_error::DbError;
 use crate::throw;
-use crate::h2_rust_common::Integer;
+use crate::h2_rust_common::{Byte, Integer};
 
 lazy_static! {
      static ref HEX_DECODE:[Integer;104] ={

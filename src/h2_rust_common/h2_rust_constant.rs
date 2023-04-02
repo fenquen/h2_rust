@@ -1,3 +1,5 @@
+use std::string::ToString;
+
 pub const POSITIVE: char = '+';
 pub const NEGATIVE: char = '-';
 pub const EQUAL: &str = "=";

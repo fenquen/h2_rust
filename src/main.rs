@@ -12,6 +12,8 @@ mod util;
 mod store;
 mod mode;
 mod result;
+mod db;
+mod mvstore;
 
 fn main() {
     println!("Hello, world!");

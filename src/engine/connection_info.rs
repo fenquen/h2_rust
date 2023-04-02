@@ -9,7 +9,7 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use toml::value::Index;
 use crate::api::error_code;
-use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant, Integer, Nullable};
+use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant, Integer, Nullable, Byte};
 use crate::message::db_error::DbError;
 use crate::command::set_types;
 use crate::engine::db_settings::DbSettings;

@@ -2,11 +2,11 @@
 name = "h2_rust"
 version = "0.1.0"
 edition = "2021"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-regex ="1"
+regex = "1"
 anyhow = "1.0"
 toml = "0.7.3"
 lazy_static = "1.4.0"
+crossbeam = "0.8"
+atomic_refcell = "0.1.9"
