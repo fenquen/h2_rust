@@ -1,5 +1,6 @@
+use std::any::Any;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use regex::bytes::Regex;
 
 pub fn any() {
@@ -184,4 +185,17 @@ fn test_atomic_refcell() {
     let mut binding = (&*a).borrow_mut();
     let company = binding.unwrap_mut();
     company.level = 19;
+}
+
+#[test]
+fn test_generic() {
+    struct Company<T> {
+        member: T,
+    }
+
+    impl <T> Company<T>{
+        fn a(&self){
+
+        }
+    }
 }

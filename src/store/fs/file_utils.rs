@@ -65,6 +65,22 @@ pub fn try_delete(path: impl AsRef<Path>) -> bool {
     }
 }
 
+pub fn delete(path: impl AsRef<Path>) -> Result<()> {
+    fs::remove_file(path.as_ref())?;
+    Ok(())
+}
+
+pub fn move1(old: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+    fs::rename(old, to)?;
+    Ok(())
+}
+
+pub fn create_directories(dir: impl AsRef<Path>) -> Result<()> {
+    fs::create_dir_all(dir.as_ref())?;
+    Ok(())
+}
+
+
 mod test {
     use std::fs;
     use crate::store::fs::file_utils::new_directory_stream;

@@ -23,6 +23,8 @@ pub struct DbSettings {
     pub db_close_on_exit: bool,
     pub ignore_catalogs: bool,
     pub mv_store: bool,
+    pub auto_compact_fill_rate: Integer,
+    pub compress_data: bool,
 }
 
 impl DbSettings {
@@ -36,9 +38,9 @@ impl DbSettings {
     }
 
     fn init(&mut self) -> Result<()> {
-        let lower = Self::get_bool(self, "DATABASE_TO_LOWER", false)?;
-        let upper_set = Self::contains_key(self, "DATABASE_TO_UPPER");
-        let mut upper = Self::get_bool(self, "DATABASE_TO_UPPER", true)?;
+        let lower = self.get_bool("DATABASE_TO_LOWER", false)?;
+        let upper_set = self.contains_key("DATABASE_TO_UPPER");
+        let mut upper = self.get_bool("DATABASE_TO_UPPER", true)?;
         if lower && upper {
             if upper_set {
                 Err(DbError::get(error_code::UNSUPPORTED_SETTING_COMBINATION, vec!["DATABASE_TO_LOWER & DATABASE_TO_UPPER"]))?;
@@ -53,10 +55,14 @@ impl DbSettings {
         self.settings.insert("DATABASE_TO_LOWER".to_string(), lower.to_string());
         self.settings.insert("DATABASE_TO_UPPER".to_string(), upper.to_string());
 
-        self.db_close_on_exit = Self::get_bool(self, "DB_CLOSE_ON_EXIT", true)?;
-        self.ignore_catalogs = Self::get_bool(self, "IGNORE_CATALOGS", false)?;
+        self.db_close_on_exit = self.get_bool("DB_CLOSE_ON_EXIT", true)?;
+        self.ignore_catalogs = self.get_bool("IGNORE_CATALOGS", false)?;
 
-        self.mv_store = Self::get_bool(self, "MV_STORE", true)?;
+        self.mv_store = self.get_bool("MV_STORE", true)?;
+
+        self.auto_compact_fill_rate = self.get_int("AUTO_COMPACT_FILL_RATE", 90)?;
+
+        self.compress_data = self.get_bool("COMPRESS", false)?;
 
         Ok(())
     }
