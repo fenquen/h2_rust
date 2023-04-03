@@ -8,6 +8,7 @@ use crate::engine::db_settings::DbSettings;
 use anyhow::Result;
 use atomic_refcell::AtomicRefCell;
 use crate::api::error_code;
+use crate::db::store::{Store, StoreRef};
 use crate::engine::{constant, database};
 use crate::engine::mode::Mode;
 use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Nullable};
@@ -42,20 +43,21 @@ pub struct Database {
     ignore_catalogs: bool,
     lock_mode: Integer,
     starting: AtomicBool,
+    store: StoreRef,
 }
 
 impl Database {
     pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<()> {
-        let database: Database = Default::default();
-        let this = Arc::new(AtomicRefCell::new(NotNull(database)));
+        let this = Arc::new(AtomicRefCell::new(NotNull(Default::default())));
         Self::init(this, connection_info, cipher)?;
+
         Ok(())
     }
 
-    fn init(this: Arc<AtomicRefCell<Nullable<Database>>>,
+    fn init(this_arc: Arc<AtomicRefCell<Nullable<Database>>>,
             connection_info: &mut ConnectionInfo,
             cipher: &String) -> Result<()> {
-        let mut this_atomic_ref_mut = (&*this).borrow_mut();
+        let mut this_atomic_ref_mut = (&*this_arc).borrow_mut();
         let this = this_atomic_ref_mut.unwrap_mut();
 
         this.db_settings = connection_info.get_db_settings()?;
@@ -159,7 +161,7 @@ impl Database {
                 throw!( DbError::get(error_code::GENERAL_ERROR_1,vec!["mv store not enabled"]));
             }
 
-            //store = new Store(this, connectionInfo.fileEncryptionKey);
+            this.store = Store::new(this_arc.clone(), connection_info.file_encryption_key.clone())?;
         }
 
         Ok(())

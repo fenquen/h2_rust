@@ -71,8 +71,6 @@ pub fn test_translate() {
     consume(d1); // 很奇怪这个不会被消化掉
     //let d4 = d1; // 如果d1 是 &mut 那么会转移到d4 因为&mut未实现copy
     println!("{}", *d1)
-
-    // print_it1(a);
 }
 
 #[test]
@@ -88,8 +86,9 @@ use std::thread;
 use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
-use crate::h2_rust_common::Nullable;
+use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
+use crate::mvstore::data_utils;
 
 fn check<T: BorrowMut<[i32]>>(mut v: T) {
     assert_eq!(&mut [1, 2, 3], v.borrow_mut());
@@ -155,7 +154,7 @@ fn test_multi_thread_refcell() {
 
 #[test]
 fn test_crossbeam() {
-    let mut a = Arc::new(AtomicCell::new(Company { level: 1 }));
+    let a = Arc::new(AtomicCell::new(Company { level: 1 }));
     let aa = a.clone();
 
     thread::spawn(move || {
@@ -193,9 +192,21 @@ fn test_generic() {
         member: T,
     }
 
-    impl <T> Company<T>{
-        fn a(&self){
+    impl<T> Company<T> {
+        fn a(&self) {}
+    }
+}
 
-        }
+#[test]
+fn test_hash_map_any() {
+    let mut map = HashMap::<String, Box<dyn Any>>::new();
+    map.insert("value".to_string(), Box::new("171".to_string()));
+
+    let a = data_utils::get_config_int_param(&map, "value", 1);
+    println!("{}", a);
+
+    match h2_rust_utils::get_from_map::<String>(&map, "value") {
+        Nullable::NotNull(s) => { println!("not null :{}", s) }
+        Nullable::Null => { println!("null") }
     }
 }

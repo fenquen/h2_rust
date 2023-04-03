@@ -6,7 +6,7 @@ use crate::engine::constant;
 use crate::engine::database::Database;
 use crate::h2_rust_common::Nullable;
 use crate::h2_rust_common::Nullable::NotNull;
-use crate::mvstore::mv_store::MVStoreBuilder;
+use crate::mvstore::mv_store::{MVStoreBuilder, MVStoreRef};
 use crate::mvstore::mv_store_tool;
 use crate::store::fs::file_utils;
 
@@ -14,13 +14,17 @@ use crate::store::fs::file_utils;
 pub struct Store {
     mv_file_path: String,
     encrypted: bool,
+    mv_store: MVStoreRef,
 }
 
+pub type StoreRef = Arc<AtomicRefCell<Nullable<Store>>>;
+
 impl Store {
-    pub fn new(database: Arc<AtomicRefCell<Nullable<Database>>>, encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<()> {
+    pub fn new(database: Arc<AtomicRefCell<Nullable<Database>>>,
+               encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<StoreRef> {
         let this = Arc::new(AtomicRefCell::new(NotNull(Store::default())));
-        Self::init(this, database, encryption_key)?;
-        Ok(())
+        Self::init(this.clone(), database, encryption_key)?;
+        Ok(this)
     }
 
     pub fn init(this: Arc<AtomicRefCell<Nullable<Store>>>,
@@ -76,6 +80,8 @@ impl Store {
         }
 
         this.encrypted = encrypted;
+
+        this.mv_store = mv_store_builder.open()?;
 
         Ok(())
     }

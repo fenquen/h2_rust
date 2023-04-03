@@ -40,8 +40,7 @@ pub fn can_write(path: impl AsRef<Path>) -> bool {
 pub fn get_parent(path: impl AsRef<Path>) -> Result<PathBuf> {
     match path.as_ref().parent() {
         Some(p) => Ok(p.to_path_buf()),
-        None => throw!(DbError::get(error_code::GENERAL_ERROR_1,
-                                 vec![&format!("can't get the parent path :{}", path.as_ref().to_str().unwrap())]))
+        None => throw!(DbError::get(error_code::GENERAL_ERROR_1, vec![&format!("can't get the parent path :{}", path.as_ref().to_str().unwrap())]))
     }
 }
 

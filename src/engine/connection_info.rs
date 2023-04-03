@@ -90,6 +90,7 @@ pub struct ConnectionInfo {
     pub unnamed_in_memory: bool,
     pub user_password_hash: Arc<Nullable<Vec<u8>>>,
     pub file_password_hash: Arc<Nullable<Vec<u8>>>,
+    pub file_encryption_key:Arc<Nullable<Vec<u8>>>,
 }
 
 impl ConnectionInfo {

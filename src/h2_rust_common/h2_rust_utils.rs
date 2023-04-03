@@ -1,12 +1,14 @@
+use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{is_separator, Path};
 use crate::properties_type;
 use anyhow::Result;
 use crate::api::error_code;
-use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Properties};
+use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Nullable, Properties};
 use crate::h2_rust_common::h2_rust_constant;
+use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 
 pub fn load_properties(prop_file_path: &Path) -> Result<Properties> {
@@ -62,6 +64,23 @@ pub fn integer_decode(s: &str) -> Result<Integer> {
         Ok(r) => Ok(r),
         Err(e) => {
             Err(DbError::get(error_code::DATA_CONVERSION_ERROR_1, vec![&format!("covert text {} to number failed", s)]))?
+        }
+    }
+}
+
+/// 以前是为了偷懒简便 不去区分是""还是null都是使用的""
+pub fn get_from_map<T: Clone + 'static>(map: &HashMap<String, Box<dyn Any>>, key: &str) -> Nullable<T> {
+    match map.get(key) {
+        Some(b) => {
+            match (&**b).downcast_ref::<T>() {
+                Some(s) => {
+                    NotNull(s.clone())
+                }
+                None => Null
+            }
+        }
+        None => {
+            Null
         }
     }
 }

@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 use crate::h2_rust_common::h2_rust_constant::{NEGATIVE, POSITIVE};
@@ -60,23 +61,6 @@ impl<T> From<Option<T>> for Nullable<T> {
             NotNull(t)
         } else {
             Null
-        }
-    }
-}
-
-
-pub enum Nullable1<T> {
-    NotNull(Box<T>),
-    Null,
-}
-
-impl<T> Nullable1<T> {
-    pub fn unwrap_mut(&self) {
-        match self {
-            Nullable1::NotNull(b) => {
-
-            }
-            Nullable1::Null => panic!("null")
         }
     }
 }
