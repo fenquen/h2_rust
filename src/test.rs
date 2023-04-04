@@ -80,6 +80,7 @@ fn string_int() {
 
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -209,4 +210,66 @@ fn test_hash_map_any() {
         Nullable::NotNull(s) => { println!("not null :{}", s) }
         Nullable::Null => { println!("null") }
     }
+}
+
+fn test_abstract() {
+    trait Locale {
+        fn format_date() -> String;
+    }
+
+    pub struct Greeting<LOCALE: Locale> {
+        name: String,
+        locale: PhantomData<LOCALE>, // needed to satisfy compiler
+    }
+
+    impl<LOCALE: Locale> Greeting<LOCALE> {
+        pub fn new(name: String) -> Self {
+            Self {
+                name,
+                locale: PhantomData,
+            }
+        }
+
+        pub fn greet(&self) {
+            format!("Hello {}\nToday is {}", self.name, LOCALE::format_date());
+        }
+    }
+
+    pub struct UsaLocale;
+
+    impl Locale for UsaLocale {
+        fn format_date() -> String {
+            // somehow get year, month, day
+            format!("{}/{}", "month", "year")
+        }
+    }
+
+    pub type UsaGreeting = Greeting<UsaLocale>;
+}
+
+#[test]
+fn test_parameter_func() {
+    struct A<T: ?Sized> {
+        pub t: Arc<T>,
+    }
+
+    struct B {
+        pub a: A<dyn Any>,
+    }
+
+    impl B {
+        pub fn add(&mut self, a: A<dyn Any>) {
+            self.a = a;
+        }
+
+        pub fn read<T: 'static>(&self) -> &T {
+            self.a.t.downcast_ref::<T>().unwrap()
+        }
+    }
+
+    let a:A<dyn Any> = A { t: Arc::new(1 ) };
+    let b = B { a };
+
+    let d = b.read::<Integer>();
+    println!("{}", d);
 }

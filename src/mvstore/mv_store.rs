@@ -5,9 +5,11 @@ use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Long, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
-use crate::mvstore::cache::cache_long_key_lirs::CacheLongKeyLIRSConfig;
+use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
 use crate::mvstore::data_utils;
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
+use crate::mvstore::mv_map::MVMap;
+use crate::mvstore::page::Page;
 
 #[derive(Default)]
 pub struct MVStore {
@@ -15,6 +17,8 @@ pub struct MVStore {
     compression_level: Integer,
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
+
+    page_cache:CacheLongKeyLIRS<Page<String, String>>
 }
 
 pub type MVStoreRef = Arc<AtomicRefCell<Nullable<MVStore>>>;
@@ -42,6 +46,7 @@ impl MVStore {
         }
         this.file_store_shall_be_closed = true;
 
+        // cache体系
         let mut pg_split_size = 48; // for "mem:" case it is # of keys
         let mut page_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
         let mut chunk_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
@@ -65,8 +70,11 @@ impl MVStore {
 
         }
 
-
         Ok(())
+    }
+
+    pub fn read_page<K, V>(&self, mv_map: MVMap<K, V>, pos: Long) {
+      //  pageCache.put(page.getPos(), page, page.getMemory());
     }
 }
 
