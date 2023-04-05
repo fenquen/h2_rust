@@ -81,7 +81,7 @@ fn string_int() {
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::marker::PhantomData;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -217,7 +217,7 @@ fn test_abstract() {
         fn format_date() -> String;
     }
 
-    pub struct Greeting<LOCALE: Locale> {
+    struct Greeting<LOCALE: Locale> {
         name: String,
         locale: PhantomData<LOCALE>, // needed to satisfy compiler
     }
@@ -244,32 +244,36 @@ fn test_abstract() {
         }
     }
 
-    pub type UsaGreeting = Greeting<UsaLocale>;
+    type UsaGreeting = Greeting<UsaLocale>;
 }
 
 #[test]
 fn test_parameter_func() {
     struct A<T: ?Sized> {
-        pub t: Arc<T>,
+        pub t: T,
     }
 
     struct B {
-        pub a: A<dyn Any>,
+        pub a: A<Arc<dyn Any>>,
     }
 
     impl B {
-        pub fn add(&mut self, a: A<dyn Any>) {
+        pub fn add(&mut self, a: A<Arc<dyn Any>>) {
             self.a = a;
         }
 
         pub fn read<T: 'static>(&self) -> &T {
-            self.a.t.downcast_ref::<T>().unwrap()
+            self.a.t.deref().downcast_ref::<T>().unwrap()
         }
     }
 
-    let a:A<dyn Any> = A { t: Arc::new(1 ) };
+    let a: A<Arc<dyn Any>> = A { t: Arc::new(1) };
     let b = B { a };
 
     let d = b.read::<Integer>();
     println!("{}", d);
+
+
+    let a = Nullable::<Integer>::Null;
+    let a:Nullable<Integer> = a.clone();
 }

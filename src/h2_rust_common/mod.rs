@@ -64,3 +64,12 @@ impl<T> From<Option<T>> for Nullable<T> {
         }
     }
 }
+
+impl<T: Clone> Clone for Nullable<T> {
+    fn clone(&self) -> Self {
+        match self {
+            NotNull(t) => NotNull(t.clone()),
+            Null => Null
+        }
+    }
+}

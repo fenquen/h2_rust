@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Long, Nullable};
@@ -18,22 +19,22 @@ pub struct MVStore {
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
 
-    page_cache:CacheLongKeyLIRS<Page<String, String>>
+    page_cache: Nullable<CacheLongKeyLIRS<Page<Nullable<Arc<dyn Any + Sync + Send>>, Nullable<Arc<dyn Any + Sync + Send>>>>>,
 }
 
-pub type MVStoreRef = Arc<AtomicRefCell<Nullable<MVStore>>>;
+pub type MVStoreRef = Nullable<Arc<AtomicRefCell<MVStore>>>;
 
 impl MVStore {
     pub fn new(config: &HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
-        let this = Arc::new(AtomicRefCell::new(NotNull(MVStore::default())));
+        let this = NotNull(Arc::new(AtomicRefCell::new(MVStore::default())));
         Self::init(this.clone(), config)?;
 
         Ok(this)
     }
 
-    fn init(this_arc: Arc<AtomicRefCell<Nullable<MVStore>>>, config: &HashMap<String, Box<dyn Any>>) -> Result<()> {
-        let mut this_atomic_ref_mut = this_arc.borrow_mut();
-        let this = this_atomic_ref_mut.unwrap_mut();
+    fn init(mv_store_ref: MVStoreRef, config: &HashMap<String, Box<dyn Any>>) -> Result<()> {
+        let mut this_atomic_ref_mut = mv_store_ref.unwrap().borrow_mut();
+        let this = this_atomic_ref_mut.deref_mut();
 
         this.recovery_mode = config.contains_key("recoveryMode");
         this.compression_level = data_utils::get_config_int_param(&config, "compress", 0);
@@ -50,7 +51,7 @@ impl MVStore {
         let mut pg_split_size = 48; // for "mem:" case it is # of keys
         let mut page_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
         let mut chunk_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
-        if !this.file_store.borrow().is_null() {
+        if !this.file_store.is_null() {
             let cache_size = data_utils::get_config_int_param(config, "cacheSize", 16);
             if cache_size > 0 {
                 page_cache_config = NotNull(CacheLongKeyLIRSConfig::new());
@@ -64,17 +65,16 @@ impl MVStore {
             chunk_cache_config.unwrap_mut().max_memory = 1024 * 1024;
             pg_split_size = 16 * 1024;
         }
-        if !page_cache_config.is_null(){
-
-        } else {
-
+        if !page_cache_config.is_null() {
+            this.page_cache = NotNull(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
+
 
         Ok(())
     }
 
     pub fn read_page<K, V>(&self, mv_map: MVMap<K, V>, pos: Long) {
-      //  pageCache.put(page.getPos(), page, page.getMemory());
+        //  pageCache.put(page.getPos(), page, page.getMemory());
     }
 }
 

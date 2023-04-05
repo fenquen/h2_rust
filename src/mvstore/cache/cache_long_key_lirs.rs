@@ -50,7 +50,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         self.max_memory = max_memory;
 
         if !self.segment_arr.is_null() {
-            let mut segment_arr = self.segment_arr.unwrap_mut();
+            let segment_arr = self.segment_arr.unwrap_mut();
             let max = 1 + max_memory / segment_arr.len() as Long;
             for segment in segment_arr {
                 segment.max_memory = max;
@@ -74,9 +74,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         cmp::max(1, self.max_memory / self.segment_count as Long)
     }
 
-    pub fn put(&mut self, key: Long, value: V, memory: Integer) {
-
-    }
+    pub fn put(&mut self, key: Long, value: V, memory: Integer) {}
 }
 
 #[derive(Default)]
@@ -146,7 +144,7 @@ pub struct Segment<V> {
     stack_move_counter: Integer,
 }
 
-pub type SegmentRef<V> = Arc<AtomicRefCell<Nullable<Segment<V>>>>;
+pub type SegmentRef<V> = Nullable<Arc<AtomicRefCell<Segment<V>>>>;
 
 impl<V: Default + Clone> Segment<V> {
     pub fn new(max_memory: Long,
@@ -173,25 +171,25 @@ impl<V: Default + Clone> Segment<V> {
 
         // initialize the stack and queue heads
         self.stack = Entry::new_0();
-        let mut atomic_ref_mut = self.stack.borrow_mut();
-        atomic_ref_mut.unwrap_mut().stack_prev = self.stack.clone();
-        atomic_ref_mut.unwrap_mut().stack_next = self.stack.clone();
+        let mut atomic_ref_mut = self.stack.unwrap().borrow_mut();
+        atomic_ref_mut.stack_prev = self.stack.clone();
+        atomic_ref_mut.stack_next = self.stack.clone();
 
         self.queue = Entry::new_0();
-        let mut atomic_ref_mut = self.queue.borrow_mut();
-        atomic_ref_mut.unwrap_mut().queue_prev = self.queue.clone();
-        atomic_ref_mut.unwrap_mut().queue_next = self.queue.clone();
+        let mut atomic_ref_mut = self.queue.unwrap().borrow_mut();
+        atomic_ref_mut.queue_prev = self.queue.clone();
+        atomic_ref_mut.queue_next = self.queue.clone();
 
         self.queue2 = Entry::new_0();
-        let mut atomic_ref_mut = self.queue2.borrow_mut();
-        atomic_ref_mut.unwrap_mut().queue_prev = self.queue2.clone();
-        atomic_ref_mut.unwrap_mut().queue_next = self.queue2.clone();
+        let mut atomic_ref_mut = self.queue2.unwrap().borrow_mut();
+        atomic_ref_mut.queue_prev = self.queue2.clone();
+        atomic_ref_mut.queue_next = self.queue2.clone();
 
         self.entries = Vec::with_capacity(len as usize);
     }
 }
 
-pub type EntryRef<V> = Arc<AtomicRefCell<Nullable<Entry<V>>>>;
+pub type EntryRef<V> = Nullable<Arc<AtomicRefCell<Entry<V>>>>;
 
 #[derive(Default)]
 pub struct Entry<V> {
@@ -228,7 +226,7 @@ pub struct Entry<V> {
 
 impl<V: Clone + Default> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
-        Arc::new(AtomicRefCell::new(NotNull(Entry::default())))
+        NotNull(Arc::new(AtomicRefCell::new(Entry::default())))
     }
 
     pub fn new_3(key: Long, value: V, memory: Integer) -> EntryRef<V> {
@@ -236,23 +234,23 @@ impl<V: Clone + Default> Entry<V> {
         entry.key = key;
         entry.value = value;
         entry.memory = memory;
-        Arc::new(AtomicRefCell::new(NotNull(entry)))
+        NotNull(Arc::new(AtomicRefCell::new(entry)))
     }
 
     pub fn new_1(old: &EntryRef<V>) -> EntryRef<V> {
         let mut entry = Entry::default();
 
-        let atomic_ref = old.borrow();
-        let old = atomic_ref.unwrap();
+        let atomic_ref = old.unwrap().borrow();
+        let old = atomic_ref;
         entry.key = old.key;
-        entry.value = old.value.clone();
+        entry.value = (&*old).value.clone();
         entry.memory = old.memory;
-        Arc::new(AtomicRefCell::new(NotNull(entry)))
+        NotNull(Arc::new(AtomicRefCell::new(entry)))
     }
 
     /// whether this entry is hot. Cold entries are in one of the two queues.
     pub fn is_hot(&self) -> bool {
-        self.queue_next.borrow().is_null()
+        self.queue_next.is_null()
     }
 
     pub fn get_value(&self) -> V {

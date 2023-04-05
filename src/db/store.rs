@@ -1,4 +1,4 @@
-use std::ops::Add;
+use std::ops::{Add, DerefMut};
 use anyhow::Result;
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
@@ -17,21 +17,21 @@ pub struct Store {
     mv_store: MVStoreRef,
 }
 
-pub type StoreRef = Arc<AtomicRefCell<Nullable<Store>>>;
+pub type StoreRef = Nullable<Arc<AtomicRefCell<Store>>>;
 
 impl Store {
     pub fn new(database: Arc<AtomicRefCell<Nullable<Database>>>,
                encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<StoreRef> {
-        let this = Arc::new(AtomicRefCell::new(NotNull(Store::default())));
+        let this = NotNull(Arc::new(AtomicRefCell::new(Store::default())));
         Self::init(this.clone(), database, encryption_key)?;
         Ok(this)
     }
 
-    pub fn init(this: Arc<AtomicRefCell<Nullable<Store>>>,
+    pub fn init(this: StoreRef,
                 database: Arc<AtomicRefCell<Nullable<Database>>>,
                 encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<()> {
-        let mut this_atomic_ref_mut = (&*this).borrow_mut();
-        let this = this_atomic_ref_mut.unwrap_mut();
+        let mut this_atomic_ref_mut = this.unwrap().borrow_mut();
+        let this = this_atomic_ref_mut.deref_mut();
 
         let database_atomic_ref = (&*database).borrow();
         let database = database_atomic_ref.unwrap();
@@ -85,4 +85,5 @@ impl Store {
 
         Ok(())
     }
+
 }

@@ -24,10 +24,10 @@ pub struct FileStore {
     file_size: Long,
 }
 
-pub type FileStoreRef = Arc<AtomicRefCell<Nullable<FileStore>>>;
+pub type FileStoreRef = Nullable<Arc<AtomicRefCell<FileStore>>>;
 
 impl FileStore {
     pub fn new() -> Result<FileStoreRef> {
-        Ok(Arc::new(AtomicRefCell::new(NotNull(FileStore::default()))))
+        Ok(NotNull(Arc::new(AtomicRefCell::new(FileStore::default()))))
     }
 }
