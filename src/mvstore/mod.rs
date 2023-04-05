@@ -6,3 +6,5 @@ pub mod file_store;
 pub mod cache;
 pub mod page;
 pub mod mv_map;
+pub mod r#type;
+pub mod write_buffer;

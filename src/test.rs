@@ -36,6 +36,7 @@ pub fn any() {
 pub fn test_translate() {
     trait Showable {
         fn show(&self) {} // 要有self
+       // fn aa(){} 报错需要去改为 fn aa() where Self: Sized{}
     }
 
     impl dyn Showable {

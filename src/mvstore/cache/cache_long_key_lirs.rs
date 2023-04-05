@@ -70,6 +70,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         }
     }
 
+    /// determines max size of the data item size to fit into cache
     pub fn get_max_item_size(&self) -> Long {
         cmp::max(1, self.max_memory / self.segment_count as Long)
     }

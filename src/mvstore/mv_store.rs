@@ -18,8 +18,11 @@ pub struct MVStore {
     compression_level: Integer,
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
-
     page_cache: Nullable<CacheLongKeyLIRS<Page<Nullable<Arc<dyn Any + Sync + Send>>, Nullable<Arc<dyn Any + Sync + Send>>>>>,
+    chunk_cache: Nullable<CacheLongKeyLIRS<Vec<Long>>>,
+
+    pg_split_size: Integer,
+    keys_per_page: Integer,
 }
 
 pub type MVStoreRef = Nullable<Arc<AtomicRefCell<MVStore>>>;
@@ -65,16 +68,32 @@ impl MVStore {
             chunk_cache_config.unwrap_mut().max_memory = 1024 * 1024;
             pg_split_size = 16 * 1024;
         }
-        if !page_cache_config.is_null() {
+        if page_cache_config.is_not_null() {
             this.page_cache = NotNull(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
+        if chunk_cache_config.is_not_null() {
+            this.chunk_cache = NotNull(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
+        }
+
+        pg_split_size = data_utils::get_config_int_param(config, "pageSplitSize", pg_split_size);
+        if this.page_cache.is_not_null() {
+            let max_item_size = this.page_cache.unwrap().get_max_item_size() as Integer;
+            if pg_split_size > max_item_size {
+                pg_split_size = max_item_size;
+            }
+        }
+        this.pg_split_size = pg_split_size;
+        this.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
+        //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
+
+        //layout = new MVMap<>(this, 0, StringDataType.INSTANCE, StringDataType.INSTANCE);
 
 
         Ok(())
     }
 
     pub fn read_page<K, V>(&self, mv_map: MVMap<K, V>, pos: Long) {
-        //  pageCache.put(page.getPos(), page, page.getMemory());
+        //  pageCache.put(page.getPos(), page, page.get_memory());
     }
 }
 

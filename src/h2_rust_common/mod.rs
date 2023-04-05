@@ -47,6 +47,10 @@ impl<T> Nullable<T> {
             _ => false
         }
     }
+
+    pub fn is_not_null(&self)->bool{
+        !self.is_null()
+    }
 }
 
 impl<T> Default for Nullable<T> {
