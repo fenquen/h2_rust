@@ -9,8 +9,9 @@ use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
 use crate::mvstore::data_utils;
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
-use crate::mvstore::mv_map::MVMap;
+use crate::mvstore::mv_map::{MVMap, MVMapRef};
 use crate::mvstore::page::Page;
+use crate::mvstore::r#type::string_data_type;
 
 #[derive(Default)]
 pub struct MVStore {
@@ -23,6 +24,8 @@ pub struct MVStore {
 
     pg_split_size: Integer,
     keys_per_page: Integer,
+
+    layout: MVMapRef<String, String>,
 }
 
 pub type MVStoreRef = Nullable<Arc<AtomicRefCell<MVStore>>>;
@@ -86,7 +89,10 @@ impl MVStore {
         this.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        //layout = new MVMap<>(this, 0, StringDataType.INSTANCE, StringDataType.INSTANCE);
+        MVMap::new(mv_store_ref.clone(),
+                   0,
+                   string_data_type::INSTANCE.clone(),
+                   string_data_type::INSTANCE.clone());
 
 
         Ok(())

@@ -36,7 +36,7 @@ pub fn any() {
 pub fn test_translate() {
     trait Showable {
         fn show(&self) {} // 要有self
-       // fn aa(){} 报错需要去改为 fn aa() where Self: Sized{}
+        // fn aa(){} 报错需要去改为 fn aa() where Self: Sized{}
     }
 
     impl dyn Showable {
@@ -274,7 +274,53 @@ fn test_parameter_func() {
     let d = b.read::<Integer>();
     println!("{}", d);
 
-
     let a = Nullable::<Integer>::Null;
-    let a:Nullable<Integer> = a.clone();
+    let a: Nullable<Integer> = a.clone();
+}
+
+#[test]
+fn test_duplicate_name_abstract_func() {
+    trait A {
+        fn show(&self);
+        fn show1(&self);
+    }
+
+    trait B: A {
+        fn show(&self);
+    }
+
+    struct C;
+
+    impl A for C {
+        fn show(&self) {
+            println!("{}", "A::show()")
+        }
+
+        fn show1(&self) {
+            println!("{}", "A::show1()")
+        }
+    }
+
+    impl B for C {
+        fn show(&self) {
+            println!("{}", "b")
+        }
+    }
+
+    let c = C;
+    let c = &c as &dyn A;
+    c.show1();
+
+    struct User{}
+    impl User{
+        pub fn show(mut self){}
+    }
+
+    let user = User{};
+
+    user.show();
+
+
+    let mut a = Option::Some(1);
+    let a = a.as_mut().unwrap();
 }

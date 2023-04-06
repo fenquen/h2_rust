@@ -1,10 +1,12 @@
+use std::cmp::Ordering;
 use bytebuffer::ByteBuffer;
 use crate::h2_rust_common::Integer;
 use crate::mvstore::write_buffer::WriteBuffer;
-
-
+use Ordering::{Equal, Greater, Less};
 
 pub trait DataType<T> {
+    fn compare(&self, a: &T, b: &T) -> Ordering;
+
     /// Perform binary search for the key within the storage
     ///
     /// @param key          to search for
@@ -12,39 +14,73 @@ pub trait DataType<T> {
     /// @param size         number of data items in the storage
     /// @param initialGuess for key position
     /// @return index of the key , if found, - index of the insertion point, if not
-    fn binary_search(&self, key: T, storage: &Vec<T>, size: Integer, initial_guess: Integer) -> Integer;
+    fn binary_search(&self, key: &T, storage: &Vec<T>, size: Integer, initial_guess: Integer) -> Integer {
+        let mut low = 0;
+        let mut high = size - 1;
+
+        // the cached index minus one, so that
+        // for the first time (when cachedCompare is 0),
+        // the default value is used
+        let mut x = initial_guess - 1;
+        if x < 0 || x > high {
+            x = (high as u32 >> 1) as Integer; // https://blog.csdn.net/zhizhengguan/article/details/125038005
+        }
+
+        while low <= high {
+            let compare = self.compare(key, &storage[x as usize]);
+            match compare {
+                Greater => low = x + 1,
+                Less => high = x - 1,
+                Equal => return x
+            }
+
+            x = ((low + high) as u32 >> 1) as Integer;
+        }
+
+        !low
+    }
 
     /// Calculates the amount of used memory in bytes.
     fn get_memory(&self, obj: T) -> Integer;
 
     /// Whether memory estimation based on previously seen values is allowed/desirable
-    fn is_memory_estimation_allowed(&self) -> bool;
+    fn is_memory_estimation_allowed(&self) -> bool {
+        true
+    }
 
     /// Write an object.
     ///
     /// @param buff the target buffer
     /// @param obj  the value
-    fn write_2(&self, buff: WriteBuffer, obj: T);
+    fn write_2(&self, buff: &WriteBuffer, obj: &T);
 
     /// Write a list of objects.
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to write
-    fn write_3(&self, buff: WriteBuffer, storage: Vec<T>, len: Integer);
+    fn write_3(&self, buff: &WriteBuffer, storage: &Vec<T>, len: Integer) {
+        for a in 0..len as usize {
+            self.write_2(&buff, &storage[a]);
+        }
+    }
 
     /// Read an object.
     ///
     /// @param buff the source buffer
     /// @return the object
-    fn read_1(&self, buff: ByteBuffer) -> T;
+    fn read_1(&self, buff: &ByteBuffer) -> T;
 
     /// Read a list of objects.
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to read
-    fn read_3(&self, buff: ByteBuffer, storage: Vec<T>, len: Integer);
+    fn read_3(&self, buff: &ByteBuffer, storage: &mut Vec<T>, len: Integer) {
+        for a in 0..len as usize {
+            storage[a] = self.read_1(&buff);
+        }
+    }
 
     /// Create storage object of array type to hold values
     ///
