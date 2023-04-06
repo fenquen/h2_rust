@@ -3,6 +3,7 @@ use crate::h2_rust_common::Integer;
 use crate::mvstore::write_buffer::WriteBuffer;
 
 
+
 pub trait DataType<T> {
     /// Perform binary search for the key within the storage
     ///

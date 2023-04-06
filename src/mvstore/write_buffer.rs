@@ -1,3 +1,1 @@
-pub struct WriteBuffer {
-
-}
+pub struct WriteBuffer {}
