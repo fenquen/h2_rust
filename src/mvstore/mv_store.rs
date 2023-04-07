@@ -3,6 +3,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Long, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
@@ -19,27 +20,29 @@ pub struct MVStore {
     compression_level: Integer,
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
-    page_cache: Nullable<CacheLongKeyLIRS<Page<Nullable<Arc<dyn Any + Sync + Send>>, Nullable<Arc<dyn Any + Sync + Send>>>>>,
-    chunk_cache: Nullable<CacheLongKeyLIRS<Vec<Long>>>,
+    page_cache: Option<CacheLongKeyLIRS<Page<Nullable<Arc<dyn Any + Sync + Send>>, Nullable<Arc<dyn Any + Sync + Send>>>>>,
+    chunk_cache: Option<CacheLongKeyLIRS<Vec<Long>>>,
 
     pg_split_size: Integer,
-    keys_per_page: Integer,
+    pub keys_per_page: Integer,
 
     layout: MVMapRef<String, String>,
+
+    current_version: AtomicI64,
 }
 
-pub type MVStoreRef = Nullable<Arc<AtomicRefCell<MVStore>>>;
+pub type MVStoreRef = Option<Arc<AtomicRefCell<MVStore>>>;
 
 impl MVStore {
     pub fn new(config: &HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
-        let this = NotNull(Arc::new(AtomicRefCell::new(MVStore::default())));
+        let this = Some(Arc::new(AtomicRefCell::new(MVStore::default())));
         Self::init(this.clone(), config)?;
 
         Ok(this)
     }
 
     fn init(mv_store_ref: MVStoreRef, config: &HashMap<String, Box<dyn Any>>) -> Result<()> {
-        let mut this_atomic_ref_mut = mv_store_ref.unwrap().borrow_mut();
+        let mut this_atomic_ref_mut = mv_store_ref.as_ref().unwrap().borrow_mut();
         let this = this_atomic_ref_mut.deref_mut();
 
         this.recovery_mode = config.contains_key("recoveryMode");
@@ -47,7 +50,7 @@ impl MVStore {
         let file_name = h2_rust_utils::get_from_map::<String>(config, "fileName");
 
         let mut file_store_shall_be_open = false;
-        if !file_name.is_null() {
+        if file_name.is_some() {
             this.file_store = FileStore::new()?;
             file_store_shall_be_open = true;
         }
@@ -55,32 +58,32 @@ impl MVStore {
 
         // cache体系
         let mut pg_split_size = 48; // for "mem:" case it is # of keys
-        let mut page_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
-        let mut chunk_cache_config: Nullable<CacheLongKeyLIRSConfig> = Null;
-        if !this.file_store.is_null() {
+        let mut page_cache_config: Option<CacheLongKeyLIRSConfig> = None;
+        let mut chunk_cache_config: Option<CacheLongKeyLIRSConfig> = None;
+        if this.file_store.is_some() {
             let cache_size = data_utils::get_config_int_param(config, "cacheSize", 16);
             if cache_size > 0 {
-                page_cache_config = NotNull(CacheLongKeyLIRSConfig::new());
-                page_cache_config.unwrap_mut().max_memory = cache_size as Long * 1024 * 1024;
+                page_cache_config = Some(CacheLongKeyLIRSConfig::new());
+                page_cache_config.as_mut().unwrap().max_memory = cache_size as Long * 1024 * 1024;
                 let o = h2_rust_utils::get_from_map::<Integer>(config, "cacheConcurrency");
-                if !o.is_null() {
-                    page_cache_config.unwrap_mut().segment_count = *o.unwrap();
+                if o.is_some() {
+                    page_cache_config.as_mut().unwrap().segment_count = *o.as_ref().unwrap();
                 }
             }
-            chunk_cache_config = NotNull(CacheLongKeyLIRSConfig::new());
-            chunk_cache_config.unwrap_mut().max_memory = 1024 * 1024;
+            chunk_cache_config = Some(CacheLongKeyLIRSConfig::new());
+            chunk_cache_config.as_mut().unwrap().max_memory = 1024 * 1024;
             pg_split_size = 16 * 1024;
         }
-        if page_cache_config.is_not_null() {
-            this.page_cache = NotNull(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
+        if page_cache_config.is_some() {
+            this.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
-        if chunk_cache_config.is_not_null() {
-            this.chunk_cache = NotNull(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
+        if chunk_cache_config.is_some() {
+            this.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
         }
 
         pg_split_size = data_utils::get_config_int_param(config, "pageSplitSize", pg_split_size);
-        if this.page_cache.is_not_null() {
-            let max_item_size = this.page_cache.unwrap().get_max_item_size() as Integer;
+        if this.page_cache.is_some() {
+            let max_item_size = this.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
             if pg_split_size > max_item_size {
                 pg_split_size = max_item_size;
             }
@@ -89,17 +92,20 @@ impl MVStore {
         this.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        MVMap::new(mv_store_ref.clone(),
-                   0,
-                   string_data_type::INSTANCE.clone(),
-                   string_data_type::INSTANCE.clone());
-
+        this.layout = MVMap::new(mv_store_ref.clone(),
+                                 0,
+                                 string_data_type::INSTANCE.clone(),
+                                 string_data_type::INSTANCE.clone())?;
 
         Ok(())
     }
 
     pub fn read_page<K, V>(&self, mv_map: MVMap<K, V>, pos: Long) {
         //  pageCache.put(page.getPos(), page, page.get_memory());
+    }
+
+    pub fn get_current_version(&self) -> Long {
+        self.current_version.load(Ordering::Acquire)
     }
 }
 

@@ -1,14 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::Add;
+use std::ops::{Add, DerefMut};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use anyhow::Result;
+use atomic_refcell::AtomicRefCell;
 use lazy_static::lazy_static;
 use crate::api::error_code;
 use crate::engine::connection_info::ConnectionInfo;
 use crate::engine::constant;
-use crate::engine::database::Database;
+use crate::engine::database::{Database, DatabaseRef};
 use crate::engine::session_local::SessionLocal;
 use crate::h2_rust_common::{h2_rust_constant, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
@@ -17,7 +18,7 @@ use crate::store::fs::file_utils;
 use crate::throw;
 
 lazy_static! {
-    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<Nullable<DatabaseHolder>>>> = Mutex::new(HashMap::new());
+    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<AtomicRefCell<DatabaseHolder>>>> = Mutex::new(HashMap::new());
 }
 
 pub fn create_session(connection_info: &mut ConnectionInfo) -> Result<SessionLocal> {
@@ -40,22 +41,22 @@ fn open_session(connection_info: &mut ConnectionInfo) -> Result<SessionLocal> {
 fn open_session1(connection_info: &mut ConnectionInfo,
                  if_exist: bool,
                  force_creation: bool,
-                 cipher: &str) -> Result<SessionLocal> {
+                 cipher: &String) -> Result<SessionLocal> {
     connection_info.remove_property_bool("NO_UPGRADE", false);
 
     let open_new = connection_info.get_property_bool("OPEN_NEW", false)?;
-    let opened = false;
+    let mut opened = false;
 
     let database_path = connection_info.get_database_path()?;
 
     let database_holder = if connection_info.unnamed_in_memory {
-        Arc::new(NotNull(DatabaseHolder::new()))
+        Arc::new(AtomicRefCell::new(DatabaseHolder::new()))
     } else {
         let mut mutex_guard = DATABASE_PATH_DATABASE_HOLDER.lock().unwrap();
         // let mut r = mutex_guard.borrow_mut();
 
         if !mutex_guard.contains_key(&database_path) {
-            let database_holder = Arc::new(NotNull(DatabaseHolder::new()));
+            let database_holder = Arc::new(AtomicRefCell::new(DatabaseHolder::new()));
             mutex_guard.insert(database_path.to_string(), database_holder.clone()); //
             database_holder
         } else {
@@ -64,8 +65,11 @@ fn open_session1(connection_info: &mut ConnectionInfo,
     };
 
     {
-        let guard = database_holder.unwrap().database.lock().unwrap();
-        if guard.is_null() || open_new {
+        let mut  atomic_ref_mut = database_holder.borrow_mut();
+        let database_holder = atomic_ref_mut.deref_mut();
+
+        let guard = database_holder.mutex.lock().unwrap();
+        if database_holder.database.is_none() || open_new {
             if connection_info.persistent {
                 let value = connection_info.get_property("MV_STORE");
                 let mut file_name = database_path.clone().add(constant::SUFFIX_MV_FILE);
@@ -102,6 +106,13 @@ fn open_session1(connection_info: &mut ConnectionInfo,
             } else {
                 throw_not_found(if_exist, force_creation, &database_path)?;
             }
+
+            let database = Database::new(connection_info, cipher)?; // 参数connectionInfo只是为了提供信息不是委身
+            opened = true;
+            let mut found = false;
+
+
+            database_holder.database = database;
         }
     }
 
@@ -118,15 +129,15 @@ fn throw_not_found(if_exist: bool, forbid_creation: bool, name: &str) -> Result<
     Ok(())
 }
 
+#[derive(Default)]
 struct DatabaseHolder {
-    database: Arc<Mutex<Nullable<Database>>>,
+    mutex: Mutex<()>,
+    database: DatabaseRef,
 }
 
 impl DatabaseHolder {
     pub fn new() -> DatabaseHolder {
-        DatabaseHolder {
-            database: Arc::new(Mutex::new(Null)),
-        }
+        DatabaseHolder::default()
     }
 }
 

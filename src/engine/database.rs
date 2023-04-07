@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::format;
-use std::ops::Add;
+use std::ops::{Add, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use crate::engine::connection_info::ConnectionInfo;
@@ -11,7 +11,7 @@ use crate::api::error_code;
 use crate::db::store::{Store, StoreRef};
 use crate::engine::{constant, database};
 use crate::engine::mode::Mode;
-use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Nullable};
+use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Nullable, VecRef};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::message::db_error::DbError;
 use crate::mode::default_null_ordering::DefaultNullOrdering;
@@ -26,7 +26,7 @@ use crate::util::string_utils;
 pub struct Database {
     pub db_settings: DbSettings,
     persistent: bool,
-    file_password_hash: Arc<Nullable<Vec<u8>>>,
+    file_password_hash: VecRef<u8>,
     database_path: String,
     max_length_inplace_lob: Integer,
     cipher: String,
@@ -37,8 +37,8 @@ pub struct Database {
     pub read_only: bool,
     file_lock_method: FileLockMethod,
     database_url: String,
-    mode: Nullable<&'static Mode>,
-    default_null_ordering: Nullable<&'static DefaultNullOrdering>,
+    mode: Option<&'static Mode>,
+    default_null_ordering: Option<&'static DefaultNullOrdering>,
     cache_type: String,
     ignore_catalogs: bool,
     lock_mode: Integer,
@@ -46,19 +46,21 @@ pub struct Database {
     store: StoreRef,
 }
 
-impl Database {
-    pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<()> {
-        let this = Arc::new(AtomicRefCell::new(NotNull(Default::default())));
-        Self::init(this, connection_info, cipher)?;
+pub type DatabaseRef = Option<Arc<AtomicRefCell<Database>>>;
 
-        Ok(())
+impl Database {
+    pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<DatabaseRef> {
+        let this = Some(Arc::new(AtomicRefCell::new(Default::default())));
+        Self::init(this.clone(), connection_info, cipher)?;
+
+        Ok(this)
     }
 
-    fn init(this_arc: Arc<AtomicRefCell<Nullable<Database>>>,
+    fn init(database_ref: DatabaseRef,
             connection_info: &mut ConnectionInfo,
             cipher: &String) -> Result<()> {
-        let mut this_atomic_ref_mut = (&*this_arc).borrow_mut();
-        let this = this_atomic_ref_mut.unwrap_mut();
+        let mut this_atomic_ref_mut = database_ref.as_ref().unwrap().borrow_mut();
+        let this = this_atomic_ref_mut.deref_mut();
 
         this.db_settings = connection_info.get_db_settings()?;
         this.persistent = connection_info.persistent;
@@ -97,11 +99,11 @@ impl Database {
 
         this.database_url = connection_info.url.clone();
 
-        this.mode = Nullable::from(Mode::get_regular());
+        this.mode = Mode::get_regular();
         let s = connection_info.remove_property_str("MODE", h2_rust_constant::EMPTY_STR);
         if !s.is_empty() {
-            this.mode = Nullable::from(Mode::get_instance(&s));
-            if this.mode.is_null() {
+            this.mode = Mode::get_instance(&s);
+            if this.mode.is_none() {
                 throw!(DbError::get(error_code::UNKNOWN_MODE_1, vec![&s]));
             }
         }
@@ -111,7 +113,7 @@ impl Database {
             let default_null_ordering = DefaultNullOrdering::value_of(&string_utils::to_upper_english(&s));
             match default_null_ordering {
                 Some(d) => {
-                    this.default_null_ordering = NotNull(d);
+                    this.default_null_ordering = Some(d);
                 }
                 None => {
                     throw!(DbError::get_invalid_value_exception("DEFAULT_NULL_ORDERING", &s));
@@ -161,7 +163,7 @@ impl Database {
                 throw!( DbError::get(error_code::GENERAL_ERROR_1,vec!["mv store not enabled"]));
             }
 
-            this.store = Store::new(this_arc.clone(), connection_info.file_encryption_key.clone())?;
+            this.store = Store::new(database_ref.clone(), connection_info.file_encryption_key.clone())?;
         }
 
         Ok(())

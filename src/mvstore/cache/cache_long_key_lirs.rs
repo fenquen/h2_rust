@@ -11,7 +11,7 @@ use crate::mvstore::page::Page;
 pub struct CacheLongKeyLIRS<V> {
     /// the maximum memory this cache should use.
     max_memory: Long,
-    segment_arr: Nullable<Vec<Segment<V>>>,
+    segment_arr: Option<Vec<Segment<V>>>,
     segment_count: Integer,
     segment_shift: Integer,
     segment_mask: Integer,
@@ -37,7 +37,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
 
         self.segment_mask = self.segment_count - 1;
         self.stack_move_distance = config.stack_move_distance;
-        self.segment_arr = NotNull(Vec::<Segment<V>>::with_capacity(self.segment_count as usize));
+        self.segment_arr = Some(Vec::<Segment<V>>::with_capacity(self.segment_count as usize));
 
         self.clear();
 
@@ -49,8 +49,8 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         data_utils::check_argument(max_memory > 0, "Max memory must be larger than 0");
         self.max_memory = max_memory;
 
-        if !self.segment_arr.is_null() {
-            let segment_arr = self.segment_arr.unwrap_mut();
+        if self.segment_arr.is_some() {
+            let segment_arr = self.segment_arr.as_mut().unwrap();
             let max = 1 + max_memory / segment_arr.len() as Long;
             for segment in segment_arr {
                 segment.max_memory = max;
@@ -60,7 +60,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
 
     pub fn clear(&mut self) {
         let max = self.get_max_item_size();
-        let segment_arr = self.segment_arr.unwrap_mut();
+        let segment_arr = self.segment_arr.as_mut().unwrap();
         for _ in 0..self.segment_count {
             segment_arr.push(Segment::<V>::new(
                 max,
@@ -145,7 +145,7 @@ pub struct Segment<V> {
     stack_move_counter: Integer,
 }
 
-pub type SegmentRef<V> = Nullable<Arc<AtomicRefCell<Segment<V>>>>;
+pub type SegmentRef<V> = Option<Arc<AtomicRefCell<Segment<V>>>>;
 
 impl<V: Default + Clone> Segment<V> {
     pub fn new(max_memory: Long,
@@ -172,17 +172,17 @@ impl<V: Default + Clone> Segment<V> {
 
         // initialize the stack and queue heads
         self.stack = Entry::new_0();
-        let mut atomic_ref_mut = self.stack.unwrap().borrow_mut();
+        let mut atomic_ref_mut = self.stack.as_ref().unwrap().borrow_mut();
         atomic_ref_mut.stack_prev = self.stack.clone();
         atomic_ref_mut.stack_next = self.stack.clone();
 
         self.queue = Entry::new_0();
-        let mut atomic_ref_mut = self.queue.unwrap().borrow_mut();
+        let mut atomic_ref_mut = self.queue.as_ref().unwrap().borrow_mut();
         atomic_ref_mut.queue_prev = self.queue.clone();
         atomic_ref_mut.queue_next = self.queue.clone();
 
         self.queue2 = Entry::new_0();
-        let mut atomic_ref_mut = self.queue2.unwrap().borrow_mut();
+        let mut atomic_ref_mut = self.queue2.as_ref().unwrap().borrow_mut();
         atomic_ref_mut.queue_prev = self.queue2.clone();
         atomic_ref_mut.queue_next = self.queue2.clone();
 
@@ -190,7 +190,7 @@ impl<V: Default + Clone> Segment<V> {
     }
 }
 
-pub type EntryRef<V> = Nullable<Arc<AtomicRefCell<Entry<V>>>>;
+pub type EntryRef<V> = Option<Arc<AtomicRefCell<Entry<V>>>>;
 
 #[derive(Default)]
 pub struct Entry<V> {
@@ -227,7 +227,7 @@ pub struct Entry<V> {
 
 impl<V: Clone + Default> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
-        NotNull(Arc::new(AtomicRefCell::new(Entry::default())))
+        Some(Arc::new(AtomicRefCell::new(Entry::default())))
     }
 
     pub fn new_3(key: Long, value: V, memory: Integer) -> EntryRef<V> {
@@ -235,23 +235,23 @@ impl<V: Clone + Default> Entry<V> {
         entry.key = key;
         entry.value = value;
         entry.memory = memory;
-        NotNull(Arc::new(AtomicRefCell::new(entry)))
+        Some(Arc::new(AtomicRefCell::new(entry)))
     }
 
     pub fn new_1(old: &EntryRef<V>) -> EntryRef<V> {
         let mut entry = Entry::default();
 
-        let atomic_ref = old.unwrap().borrow();
+        let atomic_ref = old.as_ref().unwrap().borrow();
         let old = atomic_ref;
         entry.key = old.key;
         entry.value = (&*old).value.clone();
         entry.memory = old.memory;
-        NotNull(Arc::new(AtomicRefCell::new(entry)))
+        Some(Arc::new(AtomicRefCell::new(entry)))
     }
 
     /// whether this entry is hot. Cold entries are in one of the two queues.
     pub fn is_hot(&self) -> bool {
-        self.queue_next.is_null()
+        self.queue_next.is_none()
     }
 
     pub fn get_value(&self) -> V {

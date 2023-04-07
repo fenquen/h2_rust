@@ -84,6 +84,7 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicPtr;
 use std::thread;
 use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
@@ -208,8 +209,8 @@ fn test_hash_map_any() {
     println!("{}", a);
 
     match h2_rust_utils::get_from_map::<String>(&map, "value") {
-        Nullable::NotNull(s) => { println!("not null :{}", s) }
-        Nullable::Null => { println!("null") }
+        Some(s) => { println!("not null :{}", s) }
+        None => { println!("null") }
     }
 }
 
@@ -311,16 +312,64 @@ fn test_duplicate_name_abstract_func() {
     let c = &c as &dyn A;
     c.show1();
 
-    struct User{}
-    impl User{
-        pub fn show(mut self){}
+    struct User {}
+    impl User {
+        pub fn show(mut self) {}
     }
 
-    let user = User{};
+    let user = User {};
 
     user.show();
 
-
     let mut a = Option::Some(1);
     let a = a.as_mut().unwrap();
+}
+
+#[test]
+fn test_closure() {
+    let mut a = 1;
+    let mut f = || { a = a + 1; }; // 闭包里的其实是&mut
+    f();
+    println!("{}", a);
+
+    let mut b = String::from("hello");
+
+    // rust 自动检测到 pushed_data 这个匿名函数要修改其外部的环境变量.
+    // 因此自动推理出 pushed_data 是一个 FnMut 匿名函数.
+    let pushed_data = || {
+        b.push_str(" world!");
+
+        // 由于rust的 mutable 原则是, 只允许一个mut引用, 因此 变量 b 不能 再被其他代码引用, 所以这里要返回更改后
+        b // 要是返回b的话 函数变量前边不用加上mut 不然要加上和上边的相同
+    };
+    pushed_data();
+    // println!("{}",b);
+
+    struct Buffer<'a> {
+        buf: &'a [u8],
+        pos: usize,
+    }
+
+    impl<'a> Buffer<'a> {
+        fn new(b: &'a [u8]) -> Buffer {
+            Buffer { buf: b, pos: 0 }
+        }
+
+        fn read_bytes(&mut self) -> &'a [u8] {
+            self.pos += 3;
+            &self.buf[self.pos - 3..self.pos]
+        }
+    }
+}
+
+#[test]
+fn test_atomic_ptr() {
+    struct A {
+        value: Integer,
+    }
+
+    let mut a = A { value: 1 };
+    let a = AtomicPtr::new(&mut a);
+
+
 }

@@ -69,18 +69,18 @@ pub fn integer_decode(s: &str) -> Result<Integer> {
 }
 
 /// 以前是为了偷懒简便 不去区分是""还是null都是使用的""
-pub fn get_from_map<T: Clone + 'static>(map: &HashMap<String, Box<dyn Any>>, key: &str) -> Nullable<T> {
+pub fn get_from_map<T: Clone + 'static>(map: &HashMap<String, Box<dyn Any>>, key: &str) -> Option<T> {
     match map.get(key) {
         Some(b) => {
             match (&**b).downcast_ref::<T>() {
                 Some(s) => {
-                    NotNull(s.clone())
+                    Some(s.clone())
                 }
-                None => Null
+                None => None
             }
         }
         None => {
-            Null
+            None
         }
     }
 }

@@ -1,10 +1,10 @@
-use std::ops::{Add, DerefMut};
+use std::ops::{Add, Deref, DerefMut};
 use anyhow::Result;
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
 use crate::engine::constant;
-use crate::engine::database::Database;
-use crate::h2_rust_common::Nullable;
+use crate::engine::database::{Database, DatabaseRef};
+use crate::h2_rust_common::{Nullable, VecRef};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::{MVStoreBuilder, MVStoreRef};
 use crate::mvstore::mv_store_tool;
@@ -17,24 +17,24 @@ pub struct Store {
     mv_store: MVStoreRef,
 }
 
-pub type StoreRef = Nullable<Arc<AtomicRefCell<Store>>>;
+pub type StoreRef = Option<Arc<AtomicRefCell<Store>>>;
 
 impl Store {
-    pub fn new(database: Arc<AtomicRefCell<Nullable<Database>>>,
-               encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<StoreRef> {
-        let this = NotNull(Arc::new(AtomicRefCell::new(Store::default())));
-        Self::init(this.clone(), database, encryption_key)?;
+    pub fn new(database_ref: DatabaseRef,
+               encryption_key: VecRef<u8>) -> Result<StoreRef> {
+        let this = Some(Arc::new(AtomicRefCell::new(Store::default())));
+        Self::init(this.clone(), database_ref.clone(), encryption_key)?;
         Ok(this)
     }
 
     pub fn init(this: StoreRef,
-                database: Arc<AtomicRefCell<Nullable<Database>>>,
-                encryption_key: Arc<Nullable<Vec<u8>>>) -> Result<()> {
-        let mut this_atomic_ref_mut = this.unwrap().borrow_mut();
+                database: DatabaseRef,
+                encryption_key: VecRef<u8>) -> Result<()> {
+        let mut this_atomic_ref_mut = this.as_ref().unwrap().borrow_mut();
         let this = this_atomic_ref_mut.deref_mut();
 
-        let database_atomic_ref = (&*database).borrow();
-        let database = database_atomic_ref.unwrap();
+        let database_atomic_ref = database.as_ref().unwrap().borrow();
+        let database = database_atomic_ref.deref();
 
         let database_path = database.get_database_path()?;
         let mut mv_store_builder = MVStoreBuilder::new();
@@ -65,7 +65,7 @@ impl Store {
                 }
             }
 
-            if !encryption_key.is_null() {
+            if encryption_key.is_some() {
                 encrypted = true;
                 // mvStoreBuilder.encryptionKey(decodePassword(encryptionKey));
             }
@@ -85,5 +85,4 @@ impl Store {
 
         Ok(())
     }
-
 }

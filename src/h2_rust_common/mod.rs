@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
 use crate::h2_rust_common::h2_rust_constant::{NEGATIVE, POSITIVE};
 use anyhow::Result;
 use crate::api::error_code;
@@ -13,9 +14,10 @@ pub mod h2_rust_constant;
 
 pub type Properties = HashMap<String, String>;
 pub type Integer = i32;
-
 pub type Long = i64;
 pub type Byte = i8;
+
+pub type VecRef<T> = Option<Arc<Vec<T>>>;
 
 pub fn throw<T, E: Error + Send + Sync + 'static>(e: E) -> Result<T> {
     core::result::Result::Err(e)?
@@ -48,7 +50,7 @@ impl<T> Nullable<T> {
         }
     }
 
-    pub fn is_not_null(&self)->bool{
+    pub fn is_not_null(&self) -> bool {
         !self.is_null()
     }
 }

@@ -9,7 +9,7 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use toml::value::Index;
 use crate::api::error_code;
-use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant, Integer, Nullable, Byte};
+use crate::h2_rust_common::{Properties, h2_rust_utils, h2_rust_constant, Integer, Nullable, Byte, VecRef};
 use crate::message::db_error::DbError;
 use crate::command::set_types;
 use crate::engine::db_settings::DbSettings;
@@ -88,9 +88,9 @@ pub struct ConnectionInfo {
     pub remote: bool,
     pub ssl: bool,
     pub unnamed_in_memory: bool,
-    pub user_password_hash: Arc<Nullable<Vec<u8>>>,
-    pub file_password_hash: Arc<Nullable<Vec<u8>>>,
-    pub file_encryption_key:Arc<Nullable<Vec<u8>>>,
+    pub user_password_hash: VecRef<u8>,
+    pub file_password_hash: VecRef<u8>,
+    pub file_encryption_key:VecRef<u8>,
 }
 
 impl ConnectionInfo {
@@ -292,7 +292,7 @@ impl ConnectionInfo {
         let password = Self::remove_password(self);
         let password_hash = Self::remove_property_bool(self, "PASSWORD_HASH", false)?;
 
-        self.user_password_hash = Arc::new(NotNull(Self::hash_password(password_hash, &self.user, &password)?));
+        self.user_password_hash = Some(Arc::new(Self::hash_password(password_hash, &self.user, &password)?));
 
         Ok(())
     }

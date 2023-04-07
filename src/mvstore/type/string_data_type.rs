@@ -8,7 +8,7 @@ use crate::mvstore::r#type::data_type::DataType;
 use crate::mvstore::write_buffer::WriteBuffer;
 
 lazy_static! {
-pub static ref INSTANCE:Arc<StringDataType> = Arc::new(StringDataType);
+    pub static ref INSTANCE:Arc<StringDataType> = Arc::new(StringDataType);
 }
 
 pub struct StringDataType;
