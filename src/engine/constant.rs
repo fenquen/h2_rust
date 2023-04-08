@@ -226,16 +226,12 @@ pub const MAX_PARAMETER_INDEX: Integer = 100_000;
 /// Java 6, 32 bit: 12
 pub const MEMORY_OBJECT: Integer = 24;
 
-/**
- * The memory needed by an array.
- */
+/// The memory needed by an array.
 pub const MEMORY_ARRAY: Integer = 24;
 
-/**
- * The memory needed by a pointer.
- */
-// Java 6, 64 bit: 8
-// Java 6, 32 bit: 4
+/// The memory needed by a pointer.
+/// Java 6, 64 bit: 8
+/// Java 6, 32 bit: 4
 pub const MEMORY_POINTER: Integer = 8;
 
 /// The memory needed by a Row.

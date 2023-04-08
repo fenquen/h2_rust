@@ -370,6 +370,47 @@ fn test_atomic_ptr() {
 
     let mut a = A { value: 1 };
     let a = AtomicPtr::new(&mut a);
+}
 
+fn test_struct_combination() {
+    /// https://stackoverflow.com/questions/32552593/is-it-possible-for-one-struct-to-extend-an-existing-struct-keeping-all-the-fiel
+    ///
+    /// The good part is that you don't have to go through the pain of forwarding methods in Dog to methods in Animal; you can use them directly inside impl Animal<Dog>.
+    /// Also, you can access any fields defined in Animal from any method of Animal<Dog>.
+    ///
+    /// The bad part is that your inheritance chain is always visible (that is, you will probably never use Dog in your code, but rather Animal<Dog>).
+    /// Also, if the inheritance chain is long, you might get some very silly, long-winded types, like Animal<Dog<Chihuahua>>. I guess at that point a type alias would be advisable.
+    trait IAnimalData {
+        fn show(&self);// 抽象类中的abstract函数
+    }
 
+    struct Animal<D: IAnimalData> {
+        name: String,
+        age: i64,
+        actual: D,
+    }
+
+    // implement the 'breathe' method for all animals
+    impl<T: IAnimalData> Animal<T> {
+        fn breathe(&self) { // 抽象类中的非abstract函数
+            println!("{}", "breath");
+            self.actual.show()
+        }
+    }
+
+    impl Animal<Dog> {
+        pub fn bark(&self) -> String { // 实现类中自个的函数
+            return "bark!".to_owned();
+        }
+    }
+
+    struct Dog {
+        favorite_toy: String,
+    }
+
+    impl IAnimalData for Dog {
+        fn show(&self) {
+            println!("{}", "dog show");
+        }
+    }
 }

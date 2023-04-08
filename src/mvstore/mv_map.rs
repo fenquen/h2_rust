@@ -17,8 +17,8 @@ pub struct MVMap<K, V> {
     create_version: Long,
     keys_buffer: Option<Vec<K>>,
     values_buffer: Option<Vec<V>>,
-    key_type: Option<Arc<dyn DataType<K> + Send + Sync>>,
-    value_type: Option<Arc<dyn DataType<V> + Send + Sync>>,
+    pub key_type: Option<Arc<dyn DataType<K> + Send + Sync>>,
+    pub value_type: Option<Arc<dyn DataType<V> + Send + Sync>>,
     single_writer: bool,
     root_reference: AtomicPtr<RootReferenceRef<K, V>>,
     avg_key_size: Option<AtomicI64>,
@@ -83,7 +83,5 @@ impl<K: Default, V: Default> MVMap<K, V> {
     }
 
 
-    fn create_empty_leaf(&self){
-
-    }
+    fn create_empty_leaf(&self) {}
 }
