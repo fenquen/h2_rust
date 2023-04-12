@@ -20,8 +20,8 @@ pub struct MVStore {
     compression_level: Integer,
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
-    page_cache: Option<CacheLongKeyLIRS<Page<Nullable<Arc<dyn Any + Sync + Send>>, Nullable<Arc<dyn Any + Sync + Send>>>>>,
-    chunk_cache: Option<CacheLongKeyLIRS<Vec<Long>>>,
+    page_cache: Option<CacheLongKeyLIRS<Option<Arc<Page<Arc<dyn Any + Sync + Send>, Arc<dyn Any + Sync + Send>>>>>>,
+    chunk_cache: Option<CacheLongKeyLIRS<Option<Arc<Vec<Long>>>>>,
 
     pg_split_size: Integer,
     pub keys_per_page: Integer,

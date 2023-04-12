@@ -225,7 +225,7 @@ pub struct Entry<V> {
     map_next: EntryRef<V>,
 }
 
-impl<V: Clone + Default> Entry<V> {
+impl<V: Default + Clone> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
         Some(Arc::new(AtomicRefCell::new(Entry::default())))
     }

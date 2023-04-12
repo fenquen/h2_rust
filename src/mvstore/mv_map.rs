@@ -5,6 +5,7 @@ use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{Integer, Long, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::MVStoreRef;
+use crate::mvstore::page::{Page, PageTrait, PageTraitRef};
 use crate::mvstore::r#type::data_type::DataType;
 use crate::mvstore::root_reference::{RootReference, RootReferenceRef};
 
@@ -23,11 +24,11 @@ pub struct MVMap<K, V> {
     root_reference: AtomicPtr<RootReferenceRef<K, V>>,
     avg_key_size: Option<AtomicI64>,
     avg_val_size: Option<AtomicI64>,
-
     keys_per_page: Integer,
+    pub is_volatile: bool,
 }
 
-impl<K: Default, V: Default> MVMap<K, V> {
+impl<K: Default + 'static, V: Default + 'static> MVMap<K, V> {
     pub fn new(mv_store: MVStoreRef,
                id: Integer,
                key_type: Arc<dyn DataType<K> + Send + Sync>,
@@ -42,7 +43,6 @@ impl<K: Default, V: Default> MVMap<K, V> {
                               AtomicPtr::default(),
                               keys_per_page,
                               false)?;
-
         Ok(this)
     }
 
@@ -78,10 +78,15 @@ impl<K: Default, V: Default> MVMap<K, V> {
             mv_map.avg_val_size = Some(AtomicI64::new(0));
         }
 
-
         Ok(Some(Arc::new(AtomicRefCell::new(mv_map))))
     }
 
 
-    fn create_empty_leaf(&self) {}
+    fn create_empty_leaf(&self, mv_map_ref: MVMapRef<K, V>) -> PageTraitRef<K, V> {
+        Page::<K, V>::create_empty_leaf(mv_map_ref)
+    }
+
+    pub fn is_persistent(&self) -> bool {
+        return self.mv_store.is_some() && !self.is_volatile;
+    }
 }

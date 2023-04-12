@@ -85,7 +85,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicPtr;
-use std::thread;
+use std::{mem, thread};
 use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
@@ -380,18 +380,18 @@ fn test_struct_combination() {
     ///
     /// The bad part is that your inheritance chain is always visible (that is, you will probably never use Dog in your code, but rather Animal<Dog>).
     /// Also, if the inheritance chain is long, you might get some very silly, long-winded types, like Animal<Dog<Chihuahua>>. I guess at that point a type alias would be advisable.
-    trait IAnimalData {
+    trait AnimalTrait {
         fn show(&self);// 抽象类中的abstract函数
     }
 
-    struct Animal<D: IAnimalData> {
+    struct Animal<T: AnimalTrait> {
         name: String,
         age: i64,
-        actual: D,
+        actual: T,
     }
 
     // implement the 'breathe' method for all animals
-    impl<T: IAnimalData> Animal<T> {
+    impl<T: AnimalTrait> Animal<T> {
         fn breathe(&self) { // 抽象类中的非abstract函数
             println!("{}", "breath");
             self.actual.show()
@@ -408,9 +408,69 @@ fn test_struct_combination() {
         favorite_toy: String,
     }
 
-    impl IAnimalData for Dog {
-        fn show(&self) {
-            println!("{}", "dog show");
+    impl AnimalTrait for Dog {
+        fn show(&self) { // 只能访问到自己的field 如何应对
+            println!("{}", self.favorite_toy);
         }
     }
+}
+
+#[test]
+fn test_abstract0() {
+    trait FatherCommon {
+        fn show(&self) {
+            println!("{}", "father show");
+        }
+
+        fn change_self(&mut self);
+    }
+
+    struct Father {
+        pub hometown: String,
+    }
+
+    impl FatherCommon for Father {
+        fn change_self(&mut self) {
+            self.hometown = "change".to_string();
+        }
+    }
+
+    struct Son {
+        pub father: Father,
+        pub achievement: String,
+    }
+
+    impl Son {
+        fn private_func(&self) {
+            println!("{}", "son private");
+        }
+    }
+
+    impl FatherCommon for Son {
+        fn show(&self) {
+            self.father.show();
+            println!("{}", "show son");
+        }
+
+        fn change_self(&mut self) {
+            self.achievement = "change".to_string();
+        }
+    }
+
+    let son = Son {
+        father: Father {
+            hometown: "hometown".to_string(),
+        },
+        achievement: "achievement".to_string(),
+    };
+
+
+    fn operate(a: Arc<AtomicRefCell<dyn FatherCommon>>) {
+        let mut a = (&*a).borrow_mut();
+      //  let a = a.deref_mut();
+        a.change_self();
+        a.show();
+    }
+
+    operate(Arc::new(AtomicRefCell::new(son)));
 }
