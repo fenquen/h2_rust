@@ -1,7 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use crate::h2_rust_common::h2_rust_constant::{NEGATIVE, POSITIVE};
 use anyhow::Result;
 use crate::api::error_code;
@@ -77,5 +79,39 @@ impl<T: Clone> Clone for Nullable<T> {
             NotNull(t) => NotNull(t.clone()),
             Null => Null
         }
+    }
+}
+
+
+#[derive(Default)]
+pub struct MyMutex<T> {
+    mutex: Mutex<T>,
+    owner_thread_id: AtomicU64,
+}
+
+pub struct MyMutexGuard<'a, T: ?Sized + 'a> {
+    mutex_guard: MutexGuard<'a, T>,
+    owner_thread_id: &'a AtomicU64,
+}
+
+impl<T> MyMutex<T> {
+    pub fn lock(&self) -> MyMutexGuard<T> {
+        let mutex_guard = self.mutex.lock().unwrap();
+        self.owner_thread_id.store(thread::current().id().as_u64().get(), Ordering::Release);
+        MyMutexGuard {
+            mutex_guard,
+            owner_thread_id: &self.owner_thread_id,
+        }
+    }
+
+    pub fn is_held_by_current_thread(&self) -> bool {
+        let current_thread_id = self.owner_thread_id.load(Ordering::Acquire);
+        thread::current().id().as_u64().get() == current_thread_id
+    }
+}
+
+impl<'a, T: ?Sized + 'a> Drop for MyMutexGuard<'a, T> {
+    fn drop(&mut self) {
+        self.owner_thread_id.store(0, Ordering::Release);
     }
 }

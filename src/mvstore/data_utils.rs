@@ -7,8 +7,7 @@ use crate::message::db_error::DbError;
 use crate::throw;
 
 pub fn get_config_int_param(config: &HashMap<String, Box<dyn Any>>, key: &str, default_value: Integer) -> Integer {
-    let param = config.get(key);
-    if let Some(param) = param {
+    if let Some(param) = config.get(key) {
         let param = &**param;
         match param.downcast_ref::<Integer>() {
             Some(as_integer) => {

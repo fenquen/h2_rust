@@ -5,8 +5,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{is_separator, Path};
 use crate::properties_type;
 use anyhow::Result;
+use sys_info::MemInfo;
 use crate::api::error_code;
-use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Nullable, Properties};
+use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Long, Nullable, Properties};
 use crate::h2_rust_common::h2_rust_constant;
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
@@ -85,6 +86,31 @@ pub fn get_from_map<T: Clone + 'static>(map: &HashMap<String, Box<dyn Any>>, key
     }
 }
 
+pub fn cast<T: 'static>(object: Option<Box<dyn Any>>) -> Option<Box<T>> {
+    match object {
+        Some(ref b) => {
+            match (&**b).downcast_ref::<T>() {
+                Some(s) => {}
+                None => return None
+            }
+        }
+        None => return None
+    };
+
+    let b = object.unwrap();
+    let d = Box::leak(b);
+
+    Some(unsafe { Box::from_raw(d as *mut dyn Any as *mut T) })
+}
+
+
+pub fn get_total_physical_memory_size() -> Result<Long> {
+    match sys_info::mem_info() {
+        Ok(mem_info) => Ok(mem_info.total as Long * 1024),// 原始得到的kb
+        Err(e) => Err(anyhow::Error::from(e))
+    }
+}
+
 mod test {
     use crate::h2_rust_common::h2_rust_utils::integer_decode;
 
@@ -95,4 +121,14 @@ mod test {
             Err(e) => println!("{}", e)
         }
     }
+
+    #[test]
+    fn test_get_memory() {
+        use sys_info;
+        match sys_info::mem_info() {
+            Ok(mem_info) => { println!("{}", mem_info.total) }
+            Err(e) => {}
+        }
+    }
+    
 }

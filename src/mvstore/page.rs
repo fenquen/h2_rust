@@ -29,7 +29,7 @@ const PAGE_LEAF_MEMORY: Integer = PAGE_MEMORY +  // super
 
 const IN_MEMORY: Integer = Integer::MIN;
 
-pub type PageTraitRef<K, V> = Option<Arc<AtomicRefCell<dyn PageTrait<K, V>>>>;
+pub type PageTraitRef<K, V> = Option<Arc<AtomicRefCell<dyn PageTrait<K, V> + Send + Sync>>>;
 
 pub type PageRef<K, V> = Option<Arc<AtomicRefCell<Page<K, V>>>>;
 
@@ -46,7 +46,8 @@ pub struct Page<K, V> {
 }
 
 impl<K: Default, V: Default> Page<K, V> {
-    pub fn create_empty_leaf<K1: Default + 'static, V1: Default + 'static>(mv_map_ref: MVMapRef<K1, V1>) -> PageTraitRef<K1, V1> {
+    pub fn create_empty_leaf<K1, V1>(mv_map_ref: MVMapRef<K1, V1>) -> PageTraitRef<K1, V1> where K1: Default + Send + Sync + 'static,
+                                                                                                 V1: Default + Send + Sync + 'static {
         let mv_map_atomic_ref = mv_map_ref.as_ref().unwrap().borrow();
         let mv_map = mv_map_atomic_ref.deref();
 
@@ -61,15 +62,16 @@ impl<K: Default, V: Default> Page<K, V> {
                           PAGE_LEAF_MEMORY)
     }
 
-    pub fn create_leaf<K1: Default + 'static, V1: Default + 'static>(mv_map_ref: MVMapRef<K1, V1>,
-                                                                     keys: Vec<K1>,
-                                                                     values: Vec<V1>,
-                                                                     memory: Integer) -> PageTraitRef<K1, V1> {
+    pub fn create_leaf<K1, V1>(mv_map_ref: MVMapRef<K1, V1>,
+                               keys: Vec<K1>,
+                               values: Vec<V1>,
+                               memory: Integer) -> PageTraitRef<K1, V1> where K1: Default + Send + Sync + 'static,
+                                                                              V1: Default + Send + Sync + 'static {
         assert!(mv_map_ref.is_some());
         let page_ref = Some(Arc::new(AtomicRefCell::new(Page::<K1, V1>::default())));
         let mut page = Leaf::new(page_ref, mv_map_ref, keys, values);
         page.init_memory_account(memory);
-        let page_trait_ref = Arc::new(AtomicRefCell::new(page)) as Arc<AtomicRefCell<dyn PageTrait<K1, V1>>>;
+        let page_trait_ref = Arc::new(AtomicRefCell::new(page)) as Arc<AtomicRefCell<dyn PageTrait<K1, V1> + Send + Sync>>;
         Some(page_trait_ref)
     }
 
@@ -98,12 +100,12 @@ impl<K: Default, V: Default> Page<K, V> {
         if self.is_persistent() {
             return self.memory;
         }
-
         0
     }
 }
 
-impl<K: Default+ 'static, V: Default+ 'static> PageTrait<K, V> for Page<K, V> {
+impl<K, V> PageTrait<K, V> for Page<K, V> where K: Default + Send + Sync + 'static,
+                                                V: Default + Send + Sync + 'static {
     /// 要在trait上
     fn init_memory_account(&mut self, memory_count: Integer) {
         if !self.mv_map.as_ref().unwrap().borrow().is_persistent() {
@@ -144,7 +146,8 @@ impl<K, V> Leaf<K, V> {
     }
 }
 
-impl<K: Default+ 'static, V: Default+ 'static> PageTrait<K, V> for Leaf<K, V> {
+impl<K, V> PageTrait<K, V> for Leaf<K, V> where K: Default + Send + Sync + 'static,
+                                                V: Default + Send + Sync + 'static {
     fn init_memory_account(&mut self, memory_count: Integer) {
         self.page.as_ref().unwrap().borrow_mut().init_memory_account(memory_count);
     }

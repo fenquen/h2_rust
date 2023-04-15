@@ -1,6 +1,8 @@
 use anyhow::Result;
 use crate::api::error_code;
+use crate::h2_rust_common::{h2_rust_constant, h2_rust_utils, Integer};
 use crate::message::db_error::DbError;
+use crate::throw;
 
 pub static EMPTY_INT_ARRAY: Vec<u8> = vec![];
 
@@ -42,8 +44,21 @@ pub fn parse_bool(s: &str, default_value: bool, throw_exception: bool) -> Result
     }
 
     if throw_exception {
-        Err(DbError::get(error_code::DATA_CONVERSION_ERROR_1, vec![&format!("can't convert {} to bool", s)]))?;
+        throw!(DbError::get(error_code::DATA_CONVERSION_ERROR_1, vec![&format!("can't convert {} to bool", s)]));
     }
 
     Ok(default_value)
+}
+
+pub fn scale_for_available_memory(value: Integer) -> Integer {
+    match h2_rust_utils::get_total_physical_memory_size() {
+        Ok(total) => {
+            let mut a = total as Integer / h2_rust_constant::GB;
+            if a == 0 {
+                a = 1;
+            }
+            value * a
+        }
+        Err(e) => value
+    }
 }

@@ -1,5 +1,5 @@
+#![feature(thread_id_value)]
 #![allow(unused_assignments, unused_imports, dead_code, unused_variables, unused_must_use)]
-
 
 mod jdbc;
 mod test;

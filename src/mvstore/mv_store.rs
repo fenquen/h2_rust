@@ -1,18 +1,21 @@
 use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::sync::Arc;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::thread;
 use atomic_refcell::AtomicRefCell;
-use crate::h2_rust_common::{h2_rust_utils, Integer, Long, Nullable};
+use crate::h2_rust_common::{h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
 use crate::mvstore::data_utils;
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapRef};
-use crate::mvstore::page::Page;
+use crate::mvstore::page::{Page, PageTraitRef};
 use crate::mvstore::r#type::string_data_type;
+use crate::use_ref;
+use crate::util::utils;
 
 #[derive(Default)]
 pub struct MVStore {
@@ -20,7 +23,7 @@ pub struct MVStore {
     compression_level: Integer,
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
-    page_cache: Option<CacheLongKeyLIRS<Option<Arc<Page<Arc<dyn Any + Sync + Send>, Arc<dyn Any + Sync + Send>>>>>>,
+    page_cache: Option<CacheLongKeyLIRS<PageTraitRef<Arc<dyn Any + Sync + Send>, Arc<dyn Any + Sync + Send>>>>,
     chunk_cache: Option<CacheLongKeyLIRS<Option<Arc<Vec<Long>>>>>,
 
     pg_split_size: Integer,
@@ -29,19 +32,30 @@ pub struct MVStore {
     layout: MVMapRef<String, String>,
 
     current_version: AtomicI64,
+
+    retention_time: Integer,
+
+    auto_commit_memory: Integer,
+    auto_compact_fill_rate: Integer,
+
+    /// Lock which governs access to major store operations: store(), close(), ...
+    /// It serves as a replacement for synchronized(this), except it allows for non-blocking lock attempt
+    store_lock: MyMutex<()>,
+    serialization_lock: MyMutex<()>,
+    save_chunk_lock: MyMutex<()>,
 }
 
 pub type MVStoreRef = Option<Arc<AtomicRefCell<MVStore>>>;
 
 impl MVStore {
-    pub fn new(config: &HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
+    pub fn new(config: &mut HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
         let this = Some(Arc::new(AtomicRefCell::new(MVStore::default())));
         Self::init(this.clone(), config)?;
 
         Ok(this)
     }
 
-    fn init(mv_store_ref: MVStoreRef, config: &HashMap<String, Box<dyn Any>>) -> Result<()> {
+    fn init(mv_store_ref: MVStoreRef, config: &mut HashMap<String, Box<dyn Any>>) -> Result<()> {
         let mut this_atomic_ref_mut = mv_store_ref.as_ref().unwrap().borrow_mut();
         let this = this_atomic_ref_mut.deref_mut();
 
@@ -97,6 +111,33 @@ impl MVStore {
                                  string_data_type::INSTANCE.clone(),
                                  string_data_type::INSTANCE.clone())?;
 
+        if this.file_store.is_some() {
+            this.retention_time = use_ref!(this.file_store, get_default_retention_time);
+
+            // 19 KB memory is about 1 KB storage
+            let mut kb = Integer::max(1, Integer::min(19, utils::scale_for_available_memory(64))) * 1024;
+            kb = data_utils::get_config_int_param(config, "autoCommitBufferSize", kb);
+            this.auto_commit_memory = kb * 1024;
+
+            this.auto_compact_fill_rate = data_utils::get_config_int_param(config, "autoCompactFillRate", 90);
+            let encryption_key = config.remove("encryptionKey");
+
+            // there is no need to lock store here, since it is not opened (or even created) yet,
+            // just to make some assertions happy, when they ensure single-threaded access
+            let store_lock_guard = this.store_lock.lock();
+
+            {
+                let save_chunk_guard = this.save_chunk_lock.lock();
+
+                if file_store_shall_be_open {
+                    let read_only = config.contains_key("readOnly");
+
+                    let file_name = file_name.unwrap();
+                    use_ref!(this.file_store, open, &file_name, read_only, encryption_key);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -143,7 +184,7 @@ impl MVStoreBuilder {
         self.config.insert("compress".to_string(), Box::new(1));
     }
 
-    pub fn open(&self) -> Result<MVStoreRef> {
-        MVStore::new(&self.config)
+    pub fn open(&mut self) -> Result<MVStoreRef> {
+        MVStore::new(&mut self.config)
     }
 }

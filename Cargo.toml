@@ -12,3 +12,4 @@ crossbeam = "0.8"
 atomic_refcell = "0.1.9"
 
 bytebuffer="2.1"
+sys-info = "0.9"

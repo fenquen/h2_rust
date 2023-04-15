@@ -464,13 +464,42 @@ fn test_abstract0() {
         achievement: "achievement".to_string(),
     };
 
-
     fn operate(a: Arc<AtomicRefCell<dyn FatherCommon>>) {
         let mut a = (&*a).borrow_mut();
-      //  let a = a.deref_mut();
+        //  let a = a.deref_mut();
         a.change_self();
         a.show();
     }
 
     operate(Arc::new(AtomicRefCell::new(son)));
+}
+
+#[test]
+fn test_drop() {
+    struct User {}
+
+    impl Drop for User {
+        fn drop(&mut self) {
+            println!("{}", "user drop");
+        }
+    }
+
+    struct Company {
+        user: User,
+    }
+
+    impl Drop for Company {
+        fn drop(&mut self) {
+            println!("{}", "company drop");
+        }
+    }
+
+    fn a() -> User {
+        User {}
+    }
+
+    let user = a(); // 如是a()会直接调用 User的drop()
+    println!("{}", "aaaaaaaaaa");
+
+    let company = Company { user };
 }

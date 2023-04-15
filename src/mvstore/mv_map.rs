@@ -1,5 +1,6 @@
+use std::ops::{Deref, DerefMut};
 use anyhow::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, AtomicPtr};
 use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{Integer, Long, Nullable};
@@ -21,29 +22,41 @@ pub struct MVMap<K, V> {
     pub key_type: Option<Arc<dyn DataType<K> + Send + Sync>>,
     pub value_type: Option<Arc<dyn DataType<V> + Send + Sync>>,
     single_writer: bool,
-    root_reference: AtomicPtr<RootReferenceRef<K, V>>,
+    /// volatile 通过set函数中的mutex模拟
+    root_reference: RootReferenceRef<K, V>,
+    root_reference_set_mutex: Mutex<()>,
     avg_key_size: Option<AtomicI64>,
     avg_val_size: Option<AtomicI64>,
     keys_per_page: Integer,
     pub is_volatile: bool,
 }
 
-impl<K: Default + 'static, V: Default + 'static> MVMap<K, V> {
-    pub fn new(mv_store: MVStoreRef,
+impl<K, V> MVMap<K, V> where K: Default + Send + Sync + 'static,
+                             V: Default + Send + Sync + 'static {
+    pub fn new(mv_store_ref: MVStoreRef,
                id: Integer,
                key_type: Arc<dyn DataType<K> + Send + Sync>,
                value_type: Arc<dyn DataType<V> + Send + Sync>) -> Result<MVMapRef<K, V>> {
-        let keys_per_page = mv_store.as_ref().unwrap().borrow().keys_per_page;
-        let current_version = mv_store.as_ref().unwrap().borrow().get_current_version();
-        let this = Self::new1(mv_store,
-                              key_type,
-                              value_type,
-                              id,
-                              0,
-                              AtomicPtr::default(),
-                              keys_per_page,
-                              false)?;
-        Ok(this)
+        let keys_per_page = mv_store_ref.as_ref().unwrap().borrow().keys_per_page;
+        let current_version = mv_store_ref.as_ref().unwrap().borrow().get_current_version();
+        let mv_map_ref = Self::new1(mv_store_ref.clone(),
+                                    key_type,
+                                    value_type,
+                                    id,
+                                    0,
+                                    None,
+                                    keys_per_page,
+                                    false)?;
+
+        let mut mv_map = mv_map_ref.as_ref().unwrap().borrow_mut();
+        let mv_map = mv_map.deref_mut();
+
+        let mv_store = mv_store_ref.as_ref().unwrap().borrow();
+        let mv_store = mv_store.deref();
+
+        mv_map.set_initial_root(mv_map.create_empty_leaf(mv_map_ref.clone()), mv_store.get_current_version());
+
+        Ok(mv_map_ref.clone())
     }
 
     fn new1(mv_store: MVStoreRef,
@@ -51,7 +64,7 @@ impl<K: Default + 'static, V: Default + 'static> MVMap<K, V> {
             value_type: Arc<dyn DataType<V> + Send + Sync>,
             id: Integer,
             create_version: Long,
-            root_reference: AtomicPtr<RootReferenceRef<K, V>>,
+            root_reference: RootReferenceRef<K, V>,
             keys_per_page: Integer,
             single_writer: bool) -> Result<MVMapRef<K, V>> {
         let mut mv_map = MVMap::<K, V>::default();
@@ -88,5 +101,14 @@ impl<K: Default + 'static, V: Default + 'static> MVMap<K, V> {
 
     pub fn is_persistent(&self) -> bool {
         return self.mv_store.is_some() && !self.is_volatile;
+    }
+
+    fn set_initial_root(&mut self, root_page: PageTraitRef<K, V>, version: Long) {
+        self.set_root_reference(RootReference::new(root_page, version));
+    }
+
+    fn set_root_reference(&mut self, root_reference: RootReferenceRef<K, V>) {
+        self.root_reference_set_mutex.lock().unwrap();
+        self.root_reference = root_reference;
     }
 }
