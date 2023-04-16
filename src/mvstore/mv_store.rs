@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 use atomic_refcell::AtomicRefCell;
-use crate::h2_rust_common::{h2_rust_utils, Integer, Long, MyMutex, Nullable};
+use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
 use crate::mvstore::data_utils;
@@ -14,7 +14,7 @@ use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapRef};
 use crate::mvstore::page::{Page, PageTraitRef};
 use crate::mvstore::r#type::string_data_type;
-use crate::use_ref;
+use crate::{use_ref, use_ref_mut};
 use crate::util::utils;
 
 #[derive(Default)]
@@ -133,7 +133,8 @@ impl MVStore {
                     let read_only = config.contains_key("readOnly");
 
                     let file_name = file_name.unwrap();
-                    use_ref!(this.file_store, open, &file_name, read_only, encryption_key);
+                    let encryption_key = h2_rust_utils::cast::<Vec<Byte>>(encryption_key);
+                    use_ref_mut!(this.file_store, open, &file_name, read_only, encryption_key)?;
                 }
             }
         }

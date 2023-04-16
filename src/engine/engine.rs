@@ -109,7 +109,7 @@ fn open_session1(connection_info: &mut ConnectionInfo,
 
             let database = Database::new(connection_info, cipher)?; // 参数connectionInfo只是为了提供信息不是委身
             opened = true;
-            let mut found = false;
+            let  found = false;
 
 
             database_holder.database = database;

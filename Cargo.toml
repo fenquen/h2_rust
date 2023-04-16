@@ -11,5 +11,11 @@ lazy_static = "1.4.0"
 crossbeam = "0.8"
 atomic_refcell = "0.1.9"
 
-bytebuffer="2.1"
+bytebuffer = "2.1"
 sys-info = "0.9"
+
+#file-lock = "2"
+libc = "0.2"
+
+[build-dependencies.cc]
+version = "1.0"

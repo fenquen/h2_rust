@@ -112,7 +112,9 @@ pub fn get_total_physical_memory_size() -> Result<Long> {
 }
 
 mod test {
-    use crate::h2_rust_common::h2_rust_utils::integer_decode;
+    use std::any::Any;
+    use std::collections::HashMap;
+    use crate::h2_rust_common::h2_rust_utils::{cast, integer_decode};
 
     #[test]
     fn integer_decode_test() {
@@ -130,5 +132,14 @@ mod test {
             Err(e) => {}
         }
     }
-    
+
+    #[test]
+    fn test_cast() {
+        let mut map = HashMap::<String, Box<dyn Any>>::new();
+        map.insert("a".to_string(), Box::new("1".to_string()));
+
+        let a = Some(Box::new("a".to_string()) as Box<dyn Any>);
+        let a = cast::<String>(a);
+        println!("{}", a.unwrap());
+    }
 }
