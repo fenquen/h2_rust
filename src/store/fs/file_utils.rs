@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use crate::api::error_code;
+use crate::h2_rust_common::Long;
 use crate::message::db_error::DbError;
 use crate::throw;
 
@@ -52,7 +53,6 @@ pub fn new_directory_stream(path: impl AsRef<Path>) -> Result<Vec<String>> {
         let dir_entry = dir_entry_result?;
         vec.push(dir_entry.path().to_str().unwrap().to_string());
     }
-
     Ok(vec)
 }
 
@@ -79,6 +79,10 @@ pub fn create_directories(dir: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+pub fn get_size(path: impl AsRef<Path>) -> Result<Long> {
+    let metadata = fs::metadata(path)?;
+    Ok(metadata.len() as Long)
+}
 
 mod test {
     use std::fs;

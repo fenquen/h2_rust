@@ -1,11 +1,8 @@
-#include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
 
 int c_lock(int fd, int is_blocking, int64_t position, int64_t size, int is_shared) {
     if (fd < 0) {
-        printf("aaaaaaaaa %d", fd);
-        fflush(stdout);
         return EBADF;
     }
 

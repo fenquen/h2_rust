@@ -494,9 +494,9 @@ fn test_drop() {
         }
     }
 
-    fn a() -> User {
-        User {}
-    }
+    fn a() -> User { User {
+
+    } }
 
     let user = a(); // 如是a()会直接调用 User的drop()
     println!("{}", "aaaaaaaaaa");

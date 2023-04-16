@@ -73,7 +73,7 @@ impl FileStore {
             }
         }
 
-        let file = self.file.as_mut().unwrap();
+        let file = self.file.as_ref().unwrap();
         let fd = file.as_raw_fd();
         let file_lock_result = if read_only {
             FileLock::try_lock(fd, 0, i64::MAX, true)
@@ -91,6 +91,8 @@ impl FileStore {
                 throw!(DbError::get_internal_error(&message));
             }
         }
+
+        self.file_size = file_utils::get_size(&self.file_name)?;
 
         Ok(())
     }
