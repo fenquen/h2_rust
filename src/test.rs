@@ -80,15 +80,18 @@ fn string_int() {
 }
 
 use std::borrow::BorrowMut;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicPtr;
-use std::{mem, thread};
+use std::sync::{Arc, mpsc, Mutex, RwLock};
+use std::sync::atomic::{AtomicPtr, AtomicU64};
+use std::{alloc, mem, ptr, thread};
+use std::alloc::Layout;
+use std::rc::Rc;
 use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
+use parking_lot::RwLockWriteGuard;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
@@ -494,12 +497,202 @@ fn test_drop() {
         }
     }
 
-    fn a() -> User { User {
-
-    } }
+    fn a() -> User {
+        User {}
+    }
 
     let user = a(); // 如是a()会直接调用 User的drop()
     println!("{}", "aaaaaaaaaa");
 
     let company = Company { user };
+}
+
+#[test]
+fn test_hashmap_multi_thread() {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex, RwLock},
+        thread,
+        time::Duration,
+    };
+
+    fn main() {
+        let data = Arc::new(RwLock::new(HashMap::new()));
+
+        let threads: Vec<_> = (0..10)
+            .map(|i| {
+                let data = Arc::clone(&data);
+                thread::spawn(move || worker_thread(i, data))
+            })
+            .collect();
+
+        for t in threads {
+            t.join().expect("Thread panicked");
+        }
+
+        println!("{:?}", data);
+    }
+
+    fn worker_thread(id: u8, data: Arc<RwLock<HashMap<u8, Mutex<i32>>>>) {
+        loop {
+            // Assume that the element already exists
+            let read_lock = data.read().expect("RwLock poisoned");
+
+            if let Some(element) = read_lock.get(&id) {
+                let mut element = element.lock().expect("Mutex poisoned");
+
+                // Perform our normal work updating a specific element.
+                // The entire HashMap only has a read lock, which
+                // means that other threads can access it.
+                *element += 1;
+                thread::sleep(Duration::from_secs(1));
+
+                return;
+            }
+
+            // If we got this far, the element doesn't exist
+
+            // Get rid of our read lock and switch to a write lock
+            // You want to minimize the time we hold the writer lock
+            drop(read_lock);
+
+            let mut write_lock = data.write().expect("RwLock poisoned");
+
+            // We use HashMap::entry to handle the case where another thread
+            // inserted the same key while where were unlocked.
+            thread::sleep(Duration::from_millis(50));
+            write_lock.entry(id).or_insert_with(|| Mutex::new(0));
+            // Let the loop start us over to try again
+        }
+    }
+}
+
+#[test]
+fn test_arc_swap() {
+    use std::sync::Arc;
+    use arc_swap::ArcSwap;
+
+    fn main() {
+        let config = ArcSwap::from(Arc::new(String::default()));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                let new_conf = Arc::new("New configuration".to_owned());
+                config.store(new_conf);
+            });
+
+            for _ in 0..10 {
+                scope.spawn(|| {
+                    loop {
+                        let cfg = config.load();
+                        if !cfg.is_empty() {
+                            assert_eq!(**cfg, "New configuration");
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+#[test]
+fn test_simple_conversion() {
+    use usync::RwLock;
+    let rw_lock = RwLock::new(1);
+    let a = rw_lock.write();
+    rw_lock.write();
+    println!("{}", 16usize.trailing_zeros());
+}
+
+#[test]
+fn test_overlapping() {
+    struct Company {
+        name: String,
+        user: Option<Arc<Wrapper<User>>>,
+    }
+
+    impl Company {
+        pub fn show(&self) {
+            println!("{}", "company show");
+        }
+    }
+
+    struct User {
+        name: String,
+        belonging_company: Option<Arc<Wrapper<Company>>>,
+    }
+
+    impl User {
+        pub fn show(&mut self) {
+            if self.belonging_company.is_some() {
+                unsafe {
+                    self.belonging_company.as_ref().unwrap().as_ref_mut().show();
+                }
+            }
+            println!("{}", "user show")
+        }
+    }
+
+    struct Wrapper<T> (UnsafeCell<T>);
+
+    /*impl<T> Drop for Wrapper<T> {
+        fn drop(&mut self) {
+            if self.0.is_null() {
+                return;
+            }
+            unsafe {
+                ptr::drop_in_place(self.0);
+                alloc::dealloc(self.0 as *mut u8, Layout::new::<T>());
+            }
+        }
+    }*/
+
+    impl<T> Wrapper<T> {
+        pub fn as_ref(&self) -> &T {
+            unsafe { &*self.0.get() }
+        }
+
+        pub fn as_ref_mut(&self) -> &mut T {
+            unsafe { &mut *self.0.get() }
+        }
+    }
+
+    unsafe impl<T: Send> Send for Wrapper<T> {}
+    unsafe impl<T: Send + Sync> Sync for Wrapper<T> {}
+
+    let mut company = Company {
+        name: "company".to_string(),
+        user: Default::default(),
+    };
+    let company_wrapper_arc = Arc::new(Wrapper(UnsafeCell::new(company)));
+
+    let mut user = User {
+        name: "user".to_string(),
+        belonging_company: Default::default(),
+    };
+    let user_wrapper_arc = Arc::new(Wrapper(UnsafeCell::new(user)));
+
+    // 该字段被替换会调用其析构函数
+    user_wrapper_arc.as_ref_mut().belonging_company = Some(company_wrapper_arc.clone());
+    company_wrapper_arc.as_ref_mut().user = Some(user_wrapper_arc.clone());
+
+    let clone = user_wrapper_arc.clone();
+    let join_handle = thread::spawn(move || {
+        clone.as_ref_mut().show();
+    });
+
+    user_wrapper_arc.as_ref_mut().show();
+    join_handle.join();
+}
+
+#[test]
+fn test_a() {
+    struct User(String);
+
+    let a = Arc::new(User("a".to_string()));
+    let join_handle = thread::spawn(move || {
+        let a = Arc::clone(&a);
+        println!("{}", a.0);
+    });
+    join_handle.join();
 }

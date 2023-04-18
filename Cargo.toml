@@ -16,6 +16,10 @@ sys-info = "0.9"
 
 #file-lock = "2"
 libc = "0.2"
+arc-swap = "1.6.0"
+
+parking_lot = "0.12"
+usync = "0.2.1"
 
 [build-dependencies.cc]
 version = "1.0"

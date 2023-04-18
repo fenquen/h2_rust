@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
+use std::time::{Instant, SystemTime};
 use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
@@ -16,6 +17,25 @@ use crate::mvstore::page::{Page, PageTraitRef};
 use crate::mvstore::r#type::string_data_type;
 use crate::{use_ref, use_ref_mut};
 use crate::util::utils;
+
+
+/// The following are attribute names (keys) in store header map
+const HDR_H: &str = "H";
+const HDR_BLOCK_SIZE: &str = "blockSize";
+const HDR_FORMAT: &str = "format";
+const HDR_CREATED: &str = "created";
+const HDR_FORMAT_READ: &str = "formatRead";
+const HDR_CHUNK: &str = "chunk";
+const HDR_BLOCK: &str = "block";
+const HDR_VERSION: &str = "version";
+const HDR_CLEAN: &str = "clean";
+const HDR_FLETCHER: &str = "fletcher";
+
+const BLOCK_SIZE: Integer = 4 * 1024;
+const FORMAT_WRITE_MIN: Integer = 2;
+const FORMAT_WRITE_MAX: Integer = 2;
+const FORMAT_READ_MIN: Integer = 2;
+const FORMAT_READ_MAX: Integer = 2;
 
 #[derive(Default)]
 pub struct MVStore {
@@ -43,6 +63,10 @@ pub struct MVStore {
     store_lock: MyMutex<()>,
     serialization_lock: MyMutex<()>,
     save_chunk_lock: MyMutex<()>,
+
+    creation_time: Long,
+
+    store_header: HashMap<String, Box<dyn Any + Send + Sync>>,
 }
 
 pub type MVStoreRef = Option<Arc<AtomicRefCell<MVStore>>>;
@@ -136,6 +160,21 @@ impl MVStore {
                     let encryption_key = h2_rust_utils::cast::<Vec<Byte>>(encryption_key);
                     use_ref_mut!(this.file_store, open, &file_name, read_only, encryption_key)?;
                 }
+
+                if use_ref!(this.file_store,size) == 0 {
+                    this.creation_time =
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as Long;
+
+                    this.store_header.insert(HDR_H.to_string(), Box::new(2));
+                    this.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));
+                    this.store_header.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
+                    this.store_header.insert(HDR_CREATED.to_string(), Box::new(this.creation_time));
+                }
+
+
             }
         }
 

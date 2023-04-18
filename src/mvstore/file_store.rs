@@ -116,5 +116,9 @@ impl FileStore {
     pub fn get_default_retention_time(&self) -> Integer {
         45000
     }
+
+    pub fn size(&self) -> Long {
+        self.file_size
+    }
 }
 
