@@ -1,9 +1,10 @@
 use std::sync::Arc;
-use atomic_refcell::AtomicRefCell;
+use crate::build_h2_rust_cell;
 use crate::h2_rust_common::{Byte, Long};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::mvstore::page::PageTraitRef;
 
-pub type RootReferenceRef<K, V> = Option<Arc<AtomicRefCell<RootReference<K, V>>>>;
+pub type RootReferenceRef<K, V> = Option<Arc<H2RustCell<RootReference<K, V>>>>;
 
 pub struct RootReference<K, V> {
     /// The root page.
@@ -48,6 +49,6 @@ impl<K, V> RootReference<K, V> {
             append_counter: 0,
         };
 
-        Some(Arc::new(AtomicRefCell::new(root_reference)))
+        build_h2_rust_cell!(root_reference)
     }
 }

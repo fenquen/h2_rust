@@ -1,10 +1,11 @@
 use std::ops::{Add, Deref, DerefMut};
 use anyhow::Result;
 use std::sync::Arc;
-use atomic_refcell::AtomicRefCell;
 use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
+use crate::{build_h2_rust_cell, h2_rust_cell_ref, h2_rust_cell_ref_mutable};
 use crate::h2_rust_common::{Nullable, VecRef};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::{MVStoreBuilder, MVStoreRef};
 use crate::mvstore::mv_store_tool;
@@ -17,24 +18,21 @@ pub struct Store {
     mv_store: MVStoreRef,
 }
 
-pub type StoreRef = Option<Arc<AtomicRefCell<Store>>>;
+pub type StoreRef = Option<Arc<H2RustCell<Store>>>;
 
 impl Store {
-    pub fn new(database_ref: DatabaseRef,
-               encryption_key: VecRef<u8>) -> Result<StoreRef> {
-        let this = Some(Arc::new(AtomicRefCell::new(Store::default())));
-        Self::init(this.clone(), database_ref.clone(), encryption_key)?;
-        Ok(this)
+    pub fn new(database_ref: DatabaseRef, encryption_key: VecRef<u8>) -> Result<StoreRef> {
+        let store_ref = build_h2_rust_cell!(Store::default());
+        Self::init(store_ref.clone(), database_ref.clone(), encryption_key)?;
+        Ok(store_ref)
     }
 
-    pub fn init(this: StoreRef,
-                database: DatabaseRef,
+    pub fn init(store_ref: StoreRef,
+                database_ref: DatabaseRef,
                 encryption_key: VecRef<u8>) -> Result<()> {
-        let mut this_atomic_ref_mut = this.as_ref().unwrap().borrow_mut();
-        let this = this_atomic_ref_mut.deref_mut();
+        let this = h2_rust_cell_ref_mutable!(store_ref);
 
-        let database_atomic_ref = database.as_ref().unwrap().borrow();
-        let database = database_atomic_ref.deref();
+        let database = h2_rust_cell_ref!(database_ref);
 
         let database_path = database.get_database_path()?;
         let mut mv_store_builder = MVStoreBuilder::new();

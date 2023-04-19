@@ -4,7 +4,6 @@ use std::ops::{Add, DerefMut};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use anyhow::Result;
-use atomic_refcell::AtomicRefCell;
 use lazy_static::lazy_static;
 use crate::api::error_code;
 use crate::engine::connection_info::ConnectionInfo;
@@ -12,13 +11,14 @@ use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
 use crate::engine::session_local::SessionLocal;
 use crate::h2_rust_common::{h2_rust_constant, Nullable};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 use crate::store::fs::file_utils;
-use crate::throw;
+use crate::{h2_rust_cell_ref_mutable, throw};
 
 lazy_static! {
-    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<AtomicRefCell<DatabaseHolder>>>> = Mutex::new(HashMap::new());
+    static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<H2RustCell<DatabaseHolder>>>> = Mutex::new(HashMap::new());
 }
 
 pub fn create_session(connection_info: &mut ConnectionInfo) -> Result<SessionLocal> {
@@ -50,13 +50,13 @@ fn open_session1(connection_info: &mut ConnectionInfo,
     let database_path = connection_info.get_database_path()?;
 
     let database_holder = if connection_info.unnamed_in_memory {
-        Arc::new(AtomicRefCell::new(DatabaseHolder::new()))
+        Arc::new(H2RustCell::new(DatabaseHolder::new()))
     } else {
         let mut mutex_guard = DATABASE_PATH_DATABASE_HOLDER.lock().unwrap();
         // let mut r = mutex_guard.borrow_mut();
 
         if !mutex_guard.contains_key(&database_path) {
-            let database_holder = Arc::new(AtomicRefCell::new(DatabaseHolder::new()));
+            let database_holder = Arc::new(H2RustCell::new(DatabaseHolder::new()));
             mutex_guard.insert(database_path.to_string(), database_holder.clone()); //
             database_holder
         } else {
@@ -65,10 +65,9 @@ fn open_session1(connection_info: &mut ConnectionInfo,
     };
 
     {
-        let mut  atomic_ref_mut = database_holder.borrow_mut();
-        let database_holder = atomic_ref_mut.deref_mut();
+        let database_holder = database_holder.get_ref_mut();
 
-        let guard = database_holder.mutex.lock().unwrap();
+        let mutex_guard = database_holder.mutex.lock().unwrap();
         if database_holder.database.is_none() || open_new {
             if connection_info.persistent {
                 let value = connection_info.get_property("MV_STORE");
@@ -109,7 +108,7 @@ fn open_session1(connection_info: &mut ConnectionInfo,
 
             let database = Database::new(connection_info, cipher)?; // 参数connectionInfo只是为了提供信息不是委身
             opened = true;
-            let  found = false;
+            let found = false;
 
 
             database_holder.database = database;

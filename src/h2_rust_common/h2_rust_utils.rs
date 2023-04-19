@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{is_separator, Path};
+use std::time::SystemTime;
 use crate::properties_type;
 use anyhow::Result;
 use sys_info::MemInfo;
@@ -109,6 +110,13 @@ pub fn get_total_physical_memory_size() -> Result<Long> {
         Ok(mem_info) => Ok(mem_info.total as Long * 1024),// 原始得到的kb
         Err(e) => Err(anyhow::Error::from(e))
     }
+}
+
+pub fn get_timestamp() -> Long {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as Long
 }
 
 mod test {

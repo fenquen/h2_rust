@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use atomic_refcell::AtomicRefCell;
 use crate::h2_rust_common::{Byte, Integer, Long, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
 use std::{fs, i64};
@@ -10,6 +9,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use crate::api::error_code;
 use crate::h2_rust_common::file_lock::FileLock;
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::message::db_error::DbError;
 use crate::store::fs::file_utils;
 use crate::throw;
@@ -34,7 +34,7 @@ pub struct FileStore {
     file_lock: Option<FileLock>,
 }
 
-pub type FileStoreRef = Option<Arc<AtomicRefCell<FileStore>>>;
+pub type FileStoreRef = Option<Arc<H2RustCell<FileStore>>>;
 
 impl FileStore {
     pub fn open(&mut self, file_name: &str, mut read_only: bool, encryption_key: Option<Box<Vec<Byte>>>) -> Result<()> {
@@ -99,7 +99,7 @@ impl FileStore {
 
 
     pub fn new() -> Result<FileStoreRef> {
-        Ok(Some(Arc::new(AtomicRefCell::new(FileStore::default()))))
+        Ok(Some(Arc::new(H2RustCell::new(FileStore::default()))))
     }
 
     pub fn close(&mut self) {

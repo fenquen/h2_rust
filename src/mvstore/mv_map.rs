@@ -2,15 +2,16 @@ use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, AtomicPtr};
-use atomic_refcell::AtomicRefCell;
+use crate::{h2_rust_cell_ref, h2_rust_cell_ref_mutable};
 use crate::h2_rust_common::{Integer, Long, Nullable};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::MVStoreRef;
 use crate::mvstore::page::{Page, PageTrait, PageTraitRef};
 use crate::mvstore::r#type::data_type::DataType;
 use crate::mvstore::root_reference::{RootReference, RootReferenceRef};
 
-pub type MVMapRef<K, V> = Option<Arc<AtomicRefCell<MVMap<K, V>>>>;
+pub type MVMapRef<K, V> = Option<Arc<H2RustCell<MVMap<K, V>>>>;
 
 #[derive(Default)]
 pub struct MVMap<K, V> {
@@ -31,14 +32,14 @@ pub struct MVMap<K, V> {
     pub is_volatile: bool,
 }
 
-impl<K, V> MVMap<K, V> where K: Default + Send + Sync + 'static,
-                             V: Default + Send + Sync + 'static {
+impl<K, V> MVMap<K, V> where K: Default + 'static,
+                             V: Default + 'static {
     pub fn new(mv_store_ref: MVStoreRef,
                id: Integer,
                key_type: Arc<dyn DataType<K> + Send + Sync>,
                value_type: Arc<dyn DataType<V> + Send + Sync>) -> Result<MVMapRef<K, V>> {
-        let keys_per_page = mv_store_ref.as_ref().unwrap().borrow().keys_per_page;
-        let current_version = mv_store_ref.as_ref().unwrap().borrow().get_current_version();
+        let keys_per_page = h2_rust_cell_ref!(mv_store_ref).keys_per_page;
+        let current_version = h2_rust_cell_ref!(mv_store_ref).get_current_version();
         let mv_map_ref = Self::new1(mv_store_ref.clone(),
                                     key_type,
                                     value_type,
@@ -47,14 +48,9 @@ impl<K, V> MVMap<K, V> where K: Default + Send + Sync + 'static,
                                     None,
                                     keys_per_page,
                                     false)?;
+        let mv_map = h2_rust_cell_ref_mutable!(mv_map_ref);
 
-        let mut mv_map = mv_map_ref.as_ref().unwrap().borrow_mut();
-        let mv_map = mv_map.deref_mut();
-
-        let mv_store = mv_store_ref.as_ref().unwrap().borrow();
-        let mv_store = mv_store.deref();
-
-        mv_map.set_initial_root(mv_map.create_empty_leaf(mv_map_ref.clone()), mv_store.get_current_version());
+        mv_map.set_initial_root(mv_map.create_empty_leaf(mv_map_ref.clone()), h2_rust_cell_ref!(mv_store_ref).get_current_version());
 
         Ok(mv_map_ref.clone())
     }
@@ -91,7 +87,7 @@ impl<K, V> MVMap<K, V> where K: Default + Send + Sync + 'static,
             mv_map.avg_val_size = Some(AtomicI64::new(0));
         }
 
-        Ok(Some(Arc::new(AtomicRefCell::new(mv_map))))
+        Ok(Some(Arc::new(H2RustCell::new(mv_map))))
     }
 
 

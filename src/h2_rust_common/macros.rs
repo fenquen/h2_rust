@@ -41,11 +41,10 @@ macro_rules! enum_name {
     };
 }
 
-/// user 是 ident
-///
+/// user 是 ident <br>
 /// this.user 是 expr
 #[macro_export]
-macro_rules! use_ref {
+macro_rules! atomic_ref_cell {
 
     ($ref1:ident,$func_name:ident) => {
         {
@@ -81,7 +80,7 @@ macro_rules! use_ref {
 }
 
 #[macro_export]
-macro_rules! use_ref_mut {
+macro_rules! atomic_ref_cell_mut {
     ($ref1:ident,$func_name:ident) => {
         {
            let mut a = $ref1.as_ref().unwrap().borrow_mut();
@@ -147,8 +146,8 @@ mod test {
 
         let user = Some(Arc::new(AtomicRefCell::new(User { name: "name".to_string() })));
 
-        use_ref!(user,show);
-        use_ref_mut!(user,change,"name0");
-        use_ref!(user,show);
+        atomic_ref_cell!(user,show);
+        atomic_ref_cell_mut!(user,change,"name0");
+        atomic_ref_cell!(user,show);
     }
 }

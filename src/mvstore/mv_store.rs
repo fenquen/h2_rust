@@ -3,10 +3,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicPtr, Ordering};
 use std::thread;
 use std::time::{Instant, SystemTime};
-use atomic_refcell::AtomicRefCell;
+use crossbeam::atomic::AtomicCell;
 use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
@@ -15,7 +15,9 @@ use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapRef};
 use crate::mvstore::page::{Page, PageTraitRef};
 use crate::mvstore::r#type::string_data_type;
-use crate::{use_ref, use_ref_mut};
+use crate::{h2_rust_cell_call, atomic_ref_cell, atomic_ref_cell_mut, h2_rust_cell_mut_call, h2_rust_cell_ref_mutable, build_h2_rust_cell, h2_rust_cell_ref};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::mvstore::chunk::{Chunk, ChunkRef};
 use crate::util::utils;
 
 
@@ -67,38 +69,40 @@ pub struct MVStore {
     creation_time: Long,
 
     store_header: HashMap<String, Box<dyn Any + Send + Sync>>,
+
+    last_chunk: AtomicCell<ChunkRef>,
 }
 
-pub type MVStoreRef = Option<Arc<AtomicRefCell<MVStore>>>;
+pub type MVStoreRef = Option<Arc<H2RustCell<MVStore>>>;
 
 impl MVStore {
     pub fn new(config: &mut HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
-        let this = Some(Arc::new(AtomicRefCell::new(MVStore::default())));
+        let this = build_h2_rust_cell!(MVStore::default());
         Self::init(this.clone(), config)?;
 
         Ok(this)
     }
 
     fn init(mv_store_ref: MVStoreRef, config: &mut HashMap<String, Box<dyn Any>>) -> Result<()> {
-        let mut this_atomic_ref_mut = mv_store_ref.as_ref().unwrap().borrow_mut();
-        let this = this_atomic_ref_mut.deref_mut();
+        let this = h2_rust_cell_ref!(mv_store_ref);
+        let this_mut = h2_rust_cell_ref_mutable!(mv_store_ref);
 
-        this.recovery_mode = config.contains_key("recoveryMode");
-        this.compression_level = data_utils::get_config_int_param(&config, "compress", 0);
+        this_mut.recovery_mode = config.contains_key("recoveryMode");
+        this_mut.compression_level = data_utils::get_config_int_param(&config, "compress", 0);
         let file_name = h2_rust_utils::get_from_map::<String>(config, "fileName");
 
         let mut file_store_shall_be_open = false;
         if file_name.is_some() {
-            this.file_store = FileStore::new()?;
+            this_mut.file_store = FileStore::new()?;
             file_store_shall_be_open = true;
         }
-        this.file_store_shall_be_closed = true;
+        this_mut.file_store_shall_be_closed = true;
 
         // cache体系
         let mut pg_split_size = 48; // for "mem:" case it is # of keys
         let mut page_cache_config: Option<CacheLongKeyLIRSConfig> = None;
         let mut chunk_cache_config: Option<CacheLongKeyLIRSConfig> = None;
-        if this.file_store.is_some() {
+        if this_mut.file_store.is_some() {
             let cache_size = data_utils::get_config_int_param(config, "cacheSize", 16);
             if cache_size > 0 {
                 page_cache_config = Some(CacheLongKeyLIRSConfig::new());
@@ -113,37 +117,37 @@ impl MVStore {
             pg_split_size = 16 * 1024;
         }
         if page_cache_config.is_some() {
-            this.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
+            this_mut.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
         if chunk_cache_config.is_some() {
-            this.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
+            this_mut.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
         }
 
         pg_split_size = data_utils::get_config_int_param(config, "pageSplitSize", pg_split_size);
-        if this.page_cache.is_some() {
-            let max_item_size = this.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
+        if this_mut.page_cache.is_some() {
+            let max_item_size = this_mut.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
             if pg_split_size > max_item_size {
                 pg_split_size = max_item_size;
             }
         }
-        this.pg_split_size = pg_split_size;
-        this.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
+        this_mut.pg_split_size = pg_split_size;
+        this_mut.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        this.layout = MVMap::new(mv_store_ref.clone(),
-                                 0,
-                                 string_data_type::INSTANCE.clone(),
-                                 string_data_type::INSTANCE.clone())?;
+        this_mut.layout = MVMap::new(mv_store_ref.clone(),
+                                     0,
+                                     string_data_type::INSTANCE.clone(),
+                                     string_data_type::INSTANCE.clone())?;
 
-        if this.file_store.is_some() {
-            this.retention_time = use_ref!(this.file_store, get_default_retention_time);
+        if this_mut.file_store.is_some() {
+            this_mut.retention_time = h2_rust_cell_call!(this_mut.file_store, get_default_retention_time);
 
             // 19 KB memory is about 1 KB storage
             let mut kb = Integer::max(1, Integer::min(19, utils::scale_for_available_memory(64))) * 1024;
             kb = data_utils::get_config_int_param(config, "autoCommitBufferSize", kb);
-            this.auto_commit_memory = kb * 1024;
+            this_mut.auto_commit_memory = kb * 1024;
 
-            this.auto_compact_fill_rate = data_utils::get_config_int_param(config, "autoCompactFillRate", 90);
+            this_mut.auto_compact_fill_rate = data_utils::get_config_int_param(config, "autoCompactFillRate", 90);
             let encryption_key = config.remove("encryptionKey");
 
             // there is no need to lock store here, since it is not opened (or even created) yet,
@@ -158,23 +162,19 @@ impl MVStore {
 
                     let file_name = file_name.unwrap();
                     let encryption_key = h2_rust_utils::cast::<Vec<Byte>>(encryption_key);
-                    use_ref_mut!(this.file_store, open, &file_name, read_only, encryption_key)?;
+                    h2_rust_cell_mut_call!(this_mut.file_store, open, &file_name, read_only, encryption_key)?;
                 }
 
-                if use_ref!(this.file_store,size) == 0 {
-                    this.creation_time =
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as Long;
+                if h2_rust_cell_call!(this_mut.file_store, size) == 0 {
+                    this_mut.creation_time = h2_rust_utils::get_timestamp();
 
-                    this.store_header.insert(HDR_H.to_string(), Box::new(2));
-                    this.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));
-                    this.store_header.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
-                    this.store_header.insert(HDR_CREATED.to_string(), Box::new(this.creation_time));
+                    this_mut.store_header.insert(HDR_H.to_string(), Box::new(2));
+                    this_mut.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));
+                    this_mut.store_header.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
+                    this_mut.store_header.insert(HDR_CREATED.to_string(), Box::new(this_mut.creation_time));
+
+                    this_mut.set_last_chunk(None);
                 }
-
-
             }
         }
 
@@ -187,6 +187,14 @@ impl MVStore {
 
     pub fn get_current_version(&self) -> Long {
         self.current_version.load(Ordering::Acquire)
+    }
+
+    fn set_last_chunk(&mut self, chunk_ref: ChunkRef) {
+        self.last_chunk.store(chunk_ref);
+        //unsafe {
+          //  let a = &*self.last_chunk.as_ptr();
+            //a.as_ref().unwrap().get_ref_mut().show();
+       // }
     }
 }
 

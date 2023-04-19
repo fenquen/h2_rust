@@ -37,6 +37,7 @@ impl JdbcConnection {
 
         let mut session_remote = SessionRemote::new(connection_info)?;
         session_remote.connect_embedded_or_server(false);
+
         Ok(())
     }
 }

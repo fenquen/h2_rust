@@ -25,7 +25,9 @@ impl Driver {
         }
 
 
-        if DEFAULT_URL.eq(&url) {}
+        if DEFAULT_URL.eq(&url) {
+            
+        }
 
         throw!(DbError::get(error_code::URL_FORMAT_ERROR_2,vec![constant::URL_FORMAT,&url]))
     }

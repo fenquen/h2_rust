@@ -92,7 +92,9 @@ use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
 use parking_lot::RwLockWriteGuard;
+use crate::h2_rust_cell_mut_call;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
 
@@ -317,7 +319,7 @@ fn test_duplicate_name_abstract_func() {
 
     struct User {}
     impl User {
-        pub fn show(mut self) {}
+        pub fn show(self) {}
     }
 
     let user = User {};
@@ -606,82 +608,57 @@ fn test_simple_conversion() {
 
 #[test]
 fn test_overlapping() {
-    struct Company {
-        name: String,
-        user: Option<Arc<Wrapper<User>>>,
+    pub trait Shower {
+        fn show(&mut self);
     }
 
-    impl Company {
-        pub fn show(&self) {
+    struct Company {
+        name: String,
+        user: Option<Arc<H2RustCell<dyn Shower>>>,
+    }
+
+    impl Shower for Company {
+        fn show(&mut self) {
             println!("{}", "company show");
         }
     }
 
     struct User {
         name: String,
-        belonging_company: Option<Arc<Wrapper<Company>>>,
+        belonging_company: Option<Arc<H2RustCell<dyn Shower>>>,
     }
 
-    impl User {
-        pub fn show(&mut self) {
+    impl Shower for User {
+        fn show(&mut self) {
             if self.belonging_company.is_some() {
-                unsafe {
-                    self.belonging_company.as_ref().unwrap().as_ref_mut().show();
-                }
+                h2_rust_cell_mut_call!(self.belonging_company,show);
             }
             println!("{}", "user show")
         }
     }
 
-    struct Wrapper<T> (UnsafeCell<T>);
-
-    /*impl<T> Drop for Wrapper<T> {
-        fn drop(&mut self) {
-            if self.0.is_null() {
-                return;
-            }
-            unsafe {
-                ptr::drop_in_place(self.0);
-                alloc::dealloc(self.0 as *mut u8, Layout::new::<T>());
-            }
-        }
-    }*/
-
-    impl<T> Wrapper<T> {
-        pub fn as_ref(&self) -> &T {
-            unsafe { &*self.0.get() }
-        }
-
-        pub fn as_ref_mut(&self) -> &mut T {
-            unsafe { &mut *self.0.get() }
-        }
-    }
-
-    unsafe impl<T: Send> Send for Wrapper<T> {}
-    unsafe impl<T: Send + Sync> Sync for Wrapper<T> {}
-
-    let mut company = Company {
+    let company = Company {
         name: "company".to_string(),
         user: Default::default(),
     };
-    let company_wrapper_arc = Arc::new(Wrapper(UnsafeCell::new(company)));
+    let company_wrapper_arc = Arc::new(H2RustCell::new(company));
 
-    let mut user = User {
+    let user = User {
         name: "user".to_string(),
         belonging_company: Default::default(),
     };
-    let user_wrapper_arc = Arc::new(Wrapper(UnsafeCell::new(user)));
+    let user_wrapper_arc = Arc::new(H2RustCell::new(user));
 
     // 该字段被替换会调用其析构函数
-    user_wrapper_arc.as_ref_mut().belonging_company = Some(company_wrapper_arc.clone());
-    company_wrapper_arc.as_ref_mut().user = Some(user_wrapper_arc.clone());
+    user_wrapper_arc.get_ref_mut().belonging_company = Some(company_wrapper_arc.clone());
+    company_wrapper_arc.get_ref_mut().user = Some(user_wrapper_arc.clone());
 
     let clone = user_wrapper_arc.clone();
     let join_handle = thread::spawn(move || {
-        clone.as_ref_mut().show();
+        (&*clone).get_ref_mut().show();
     });
 
-    user_wrapper_arc.as_ref_mut().show();
+    (&*user_wrapper_arc).get_ref_mut().show();
     join_handle.join();
 }
 
@@ -695,4 +672,29 @@ fn test_a() {
         println!("{}", a.0);
     });
     join_handle.join();
+}
+
+
+
+#[test]
+fn test_lock(){
+    #[derive(Default)]
+    struct Company{
+        count:Integer,
+        mutex:Mutex<()>,
+    }
+
+    impl Company{
+        fn set(&mut self){
+            self.count = 1;
+        }
+    }
+
+    let a = H2RustCell::new(Company::default());
+
+    let a = a.get_ref_mut();
+
+    let guard = a.mutex.lock().unwrap();
+    a.count = 1;
+   // a.set(); // 会有错误 不可变引用的时候不能有可变引用
 }

@@ -1,8 +1,9 @@
 use std::cmp;
 use std::env::var;
 use std::sync::Arc;
-use atomic_refcell::AtomicRefCell;
+use crate::{build_h2_rust_cell, h2_rust_cell_ref, h2_rust_cell_ref_mutable};
 use crate::h2_rust_common::{Integer, Long, Nullable};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
 use crate::mvstore::page::Page;
@@ -145,7 +146,7 @@ pub struct Segment<V> {
     stack_move_counter: Integer,
 }
 
-pub type SegmentRef<V> = Option<Arc<AtomicRefCell<Segment<V>>>>;
+pub type SegmentRef<V> = Option<Arc<H2RustCell<Segment<V>>>>;
 
 impl<V: Default + Clone> Segment<V> {
     pub fn new(max_memory: Long,
@@ -172,25 +173,25 @@ impl<V: Default + Clone> Segment<V> {
 
         // initialize the stack and queue heads
         self.stack = Entry::new_0();
-        let mut atomic_ref_mut = self.stack.as_ref().unwrap().borrow_mut();
-        atomic_ref_mut.stack_prev = self.stack.clone();
-        atomic_ref_mut.stack_next = self.stack.clone();
+        let ref_mut = h2_rust_cell_ref_mutable!(self.stack);
+        ref_mut.stack_prev = self.stack.clone();
+        ref_mut.stack_next = self.stack.clone();
 
         self.queue = Entry::new_0();
-        let mut atomic_ref_mut = self.queue.as_ref().unwrap().borrow_mut();
-        atomic_ref_mut.queue_prev = self.queue.clone();
-        atomic_ref_mut.queue_next = self.queue.clone();
+        let mut ref_mut = h2_rust_cell_ref_mutable!(self.queue);
+        ref_mut.queue_prev = self.queue.clone();
+        ref_mut.queue_next = self.queue.clone();
 
         self.queue2 = Entry::new_0();
-        let mut atomic_ref_mut = self.queue2.as_ref().unwrap().borrow_mut();
-        atomic_ref_mut.queue_prev = self.queue2.clone();
-        atomic_ref_mut.queue_next = self.queue2.clone();
+        let mut ref_mut = h2_rust_cell_ref_mutable!(self.queue2);
+        ref_mut.queue_prev = self.queue2.clone();
+        ref_mut.queue_next = self.queue2.clone();
 
         self.entries = Vec::with_capacity(len as usize);
     }
 }
 
-pub type EntryRef<V> = Option<Arc<AtomicRefCell<Entry<V>>>>;
+pub type EntryRef<V> = Option<Arc<H2RustCell<Entry<V>>>>;
 
 #[derive(Default)]
 pub struct Entry<V> {
@@ -227,7 +228,7 @@ pub struct Entry<V> {
 
 impl<V: Default + Clone> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
-        Some(Arc::new(AtomicRefCell::new(Entry::default())))
+        build_h2_rust_cell!(Entry::default())
     }
 
     pub fn new_3(key: Long, value: V, memory: Integer) -> EntryRef<V> {
@@ -235,18 +236,17 @@ impl<V: Default + Clone> Entry<V> {
         entry.key = key;
         entry.value = value;
         entry.memory = memory;
-        Some(Arc::new(AtomicRefCell::new(entry)))
+        build_h2_rust_cell!(entry)
     }
 
     pub fn new_1(old: &EntryRef<V>) -> EntryRef<V> {
         let mut entry = Entry::default();
 
-        let atomic_ref = old.as_ref().unwrap().borrow();
-        let old = atomic_ref;
+        let old = h2_rust_cell_ref!(old);
         entry.key = old.key;
-        entry.value = (&*old).value.clone();
+        entry.value = old.value.clone();
         entry.memory = old.memory;
-        Some(Arc::new(AtomicRefCell::new(entry)))
+        build_h2_rust_cell!(entry)
     }
 
     /// whether this entry is hot. Cold entries are in one of the two queues.

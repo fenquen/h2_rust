@@ -6,12 +6,12 @@ use std::sync::atomic::AtomicBool;
 use crate::engine::connection_info::ConnectionInfo;
 use crate::engine::db_settings::DbSettings;
 use anyhow::Result;
-use atomic_refcell::AtomicRefCell;
 use crate::api::error_code;
 use crate::db::store::{Store, StoreRef};
 use crate::engine::{constant, database};
 use crate::engine::mode::Mode;
 use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Nullable, VecRef};
+use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::message::db_error::DbError;
 use crate::mode::default_null_ordering::DefaultNullOrdering;
@@ -19,7 +19,7 @@ use crate::store::{file_lock, file_lock_method};
 use crate::store::file_lock_method::FileLockMethod;
 use crate::store::fs::encrypt::file_encrypt;
 use crate::store::fs::file_utils;
-use crate::throw;
+use crate::{build_h2_rust_cell, h2_rust_cell_ref_mutable, throw};
 use crate::util::string_utils;
 
 #[derive(Default)]
@@ -46,11 +46,11 @@ pub struct Database {
     store: StoreRef,
 }
 
-pub type DatabaseRef = Option<Arc<AtomicRefCell<Database>>>;
+pub type DatabaseRef = Option<Arc<H2RustCell<Database>>>;
 
 impl Database {
     pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<DatabaseRef> {
-        let this = Some(Arc::new(AtomicRefCell::new(Default::default())));
+        let this = build_h2_rust_cell!(Default::default());
         Self::init(this.clone(), connection_info, cipher)?;
 
         Ok(this)
@@ -59,8 +59,7 @@ impl Database {
     fn init(database_ref: DatabaseRef,
             connection_info: &mut ConnectionInfo,
             cipher: &String) -> Result<()> {
-        let mut this_atomic_ref_mut = database_ref.as_ref().unwrap().borrow_mut();
-        let this = this_atomic_ref_mut.deref_mut();
+        let this = h2_rust_cell_ref_mutable!(database_ref);
 
         this.db_settings = connection_info.get_db_settings()?;
         this.persistent = connection_info.persistent;
@@ -169,7 +168,6 @@ impl Database {
         Ok(())
     }
 
-    // this: Arc<AtomicRefCell<Nullable<Database>>>
     fn parse_database_short_name(&self) -> String {
         //  let binding = (&*this).borrow_mut();
         //  let database = binding.unwrap();
@@ -206,8 +204,6 @@ impl Database {
         string_utils::truncate_string(&database_path, constant::MAX_IDENTIFIER_LENGTH as usize)
     }
 
-
-    // this: Arc<AtomicRefCell<Nullable<Database>>>
     fn delete_old_temp_files(&self) -> Result<()> {
         // let binding = (&*this).borrow_mut();
         // let database = binding.unwrap();

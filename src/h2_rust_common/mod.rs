@@ -14,6 +14,7 @@ pub mod macros;
 pub mod h2_rust_utils;
 pub mod h2_rust_constant;
 pub mod file_lock;
+pub mod h2_rust_cell;
 
 pub type Properties = HashMap<String, String>;
 pub type Integer = i32;
