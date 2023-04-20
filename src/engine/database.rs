@@ -19,7 +19,7 @@ use crate::store::{file_lock, file_lock_method};
 use crate::store::file_lock_method::FileLockMethod;
 use crate::store::fs::encrypt::file_encrypt;
 use crate::store::fs::file_utils;
-use crate::{build_h2_rust_cell, h2_rust_cell_ref_mutable, throw};
+use crate::{build_h2_rust_cell, get_ref_mut, throw};
 use crate::util::string_utils;
 
 #[derive(Default)]
@@ -59,7 +59,7 @@ impl Database {
     fn init(database_ref: DatabaseRef,
             connection_info: &mut ConnectionInfo,
             cipher: &String) -> Result<()> {
-        let this = h2_rust_cell_ref_mutable!(database_ref);
+        let this = get_ref_mut!(database_ref);
 
         this.db_settings = connection_info.get_db_settings()?;
         this.persistent = connection_info.persistent;

@@ -1,7 +1,7 @@
 use std::cmp;
 use std::env::var;
 use std::sync::Arc;
-use crate::{build_h2_rust_cell, h2_rust_cell_ref, h2_rust_cell_ref_mutable};
+use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
 use crate::h2_rust_common::{Integer, Long, Nullable};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
@@ -66,7 +66,8 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
             segment_arr.push(Segment::<V>::new(
                 max,
                 self.stack_move_distance,
-                8, self.non_resident_queue_size,
+                8,
+                self.non_resident_queue_size,
                 self.non_resident_queue_size_high));
         }
     }
@@ -77,6 +78,14 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
     }
 
     pub fn put(&mut self, key: Long, value: V, memory: Integer) {}
+
+    pub fn  get(&self, key:Long)->V {
+   // int hash = getHash(key);
+    //Segment<V> segment = getSegment(hash);
+   // Entry<V> entry = segment.find(key, hash);
+   // return segment.get(entry);
+        todo!()
+    }
 }
 
 #[derive(Default)]
@@ -173,17 +182,17 @@ impl<V: Default + Clone> Segment<V> {
 
         // initialize the stack and queue heads
         self.stack = Entry::new_0();
-        let ref_mut = h2_rust_cell_ref_mutable!(self.stack);
+        let ref_mut = get_ref_mut!(self.stack);
         ref_mut.stack_prev = self.stack.clone();
         ref_mut.stack_next = self.stack.clone();
 
         self.queue = Entry::new_0();
-        let mut ref_mut = h2_rust_cell_ref_mutable!(self.queue);
+        let mut ref_mut = get_ref_mut!(self.queue);
         ref_mut.queue_prev = self.queue.clone();
         ref_mut.queue_next = self.queue.clone();
 
         self.queue2 = Entry::new_0();
-        let mut ref_mut = h2_rust_cell_ref_mutable!(self.queue2);
+        let mut ref_mut = get_ref_mut!(self.queue2);
         ref_mut.queue_prev = self.queue2.clone();
         ref_mut.queue_next = self.queue2.clone();
 
@@ -242,7 +251,7 @@ impl<V: Default + Clone> Entry<V> {
     pub fn new_1(old: &EntryRef<V>) -> EntryRef<V> {
         let mut entry = Entry::default();
 
-        let old = h2_rust_cell_ref!(old);
+        let old = get_ref!(old);
         entry.key = old.key;
         entry.value = old.value.clone();
         entry.memory = old.memory;

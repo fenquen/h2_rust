@@ -15,7 +15,7 @@ use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 use crate::store::fs::file_utils;
-use crate::{h2_rust_cell_ref_mutable, throw};
+use crate::{get_ref_mut, throw};
 
 lazy_static! {
     static ref DATABASE_PATH_DATABASE_HOLDER:Mutex<HashMap<String,Arc<H2RustCell<DatabaseHolder>>>> = Mutex::new(HashMap::new());

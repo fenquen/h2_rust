@@ -88,6 +88,7 @@ use std::sync::atomic::{AtomicPtr, AtomicU64};
 use std::{alloc, mem, ptr, thread};
 use std::alloc::Layout;
 use std::rc::Rc;
+use std::task::ready;
 use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
@@ -667,25 +668,25 @@ fn test_a() {
     struct User(String);
 
     let a = Arc::new(User("a".to_string()));
+
     let join_handle = thread::spawn(move || {
         let a = Arc::clone(&a);
         println!("{}", a.0);
     });
+
     join_handle.join();
 }
 
-
-
 #[test]
-fn test_lock(){
+fn test_lock() {
     #[derive(Default)]
-    struct Company{
-        count:Integer,
-        mutex:Mutex<()>,
+    struct Company {
+        count: Integer,
+        mutex: Mutex<()>,
     }
 
-    impl Company{
-        fn set(&mut self){
+    impl Company {
+        fn set(&mut self) {
             self.count = 1;
         }
     }
@@ -696,5 +697,85 @@ fn test_lock(){
 
     let guard = a.mutex.lock().unwrap();
     a.count = 1;
-   // a.set(); // 会有错误 不可变引用的时候不能有可变引用
+    // a.set(); // 会有错误 不可变引用的时候不能有可变引用
+
+    let c = Cell::new("asdf");
+    let one = c.get();
+    c.set("qwer");
+    let two = c.get();
+}
+
+#[test]
+fn test_cast() {
+    #[derive(Default)]
+    struct User {
+        value: Integer,
+    }
+
+    trait ContainerTrait<T> {
+        fn show(&self, t: T);
+    }
+
+    #[derive(Default)]
+    struct Container<T> (T);
+
+    /* impl ContainerTrait<Arc<dyn Any>> for Container<Arc<dyn Any>> {
+         fn show(&self, t: Arc<dyn Any>) {
+             todo!()
+         }
+     }*/
+
+    impl<T: Debug> ContainerTrait<T> for Container<T> {
+        fn show(&self, t: T) {
+            todo!()
+        }
+    }
+
+    impl dyn ContainerTrait<Arc<dyn Any>> {
+        pub fn show1(&self) {
+            println!("{}", "dyn ContainerTrait");
+        }
+
+        pub fn cast<T>(&self) {}
+    }
+
+    let a = Arc::new(User::default()) as Arc<dyn Any>;
+
+
+    //let object = Arc::new(H2RustCell::new(Container(a))) as Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>;
+
+    fn cast<T>(object: Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>) {
+        let a = object.get_ref();
+    }
+
+    //let container = Container(User::default());
+    /// let container = &object as &dyn Any;
+
+    let a = &a as &dyn Any;
+    println!("{}", a.downcast_ref::<Arc<dyn Any>>().is_some());
+
+    // Option<Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>>>
+
+    enum Car {
+        TOYOTA(Toyota),
+        RENO(Reno),
+    }
+
+    impl Car {
+        pub fn run(&self) {
+            match self {
+                Self::TOYOTA(a) => { println!("{}", "toyota") }
+                Self::RENO(a) => { println!("{}", "reno") }
+            }
+        }
+    }
+
+    struct Toyota {
+
+    }
+
+    struct Reno {}
+
+    let a = Car::TOYOTA(Toyota{});
+    a.run();
 }

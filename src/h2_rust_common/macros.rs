@@ -114,6 +114,12 @@ macro_rules! atomic_ref_cell_mut {
     };
 }
 
+
+macro_rules! unsigned_right_shit {
+    ($number:expr,$shift:expr) => {
+        $number as u64 >> $shift
+    };
+}
 mod test {
     use std::sync::Arc;
     use atomic_refcell::AtomicRefCell;

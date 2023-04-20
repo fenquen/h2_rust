@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI64, AtomicPtr};
-use crate::{h2_rust_cell_ref, h2_rust_cell_ref_mutable};
+use crate::{get_ref, get_ref_mut};
 use crate::h2_rust_common::{Integer, Long, Nullable};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
@@ -23,6 +23,7 @@ pub struct MVMap<K, V> {
     pub key_type: Option<Arc<dyn DataType<K> + Send + Sync>>,
     pub value_type: Option<Arc<dyn DataType<V> + Send + Sync>>,
     single_writer: bool,
+
     /// volatile 通过set函数中的mutex模拟
     root_reference: RootReferenceRef<K, V>,
     root_reference_set_mutex: Mutex<()>,
@@ -30,16 +31,16 @@ pub struct MVMap<K, V> {
     avg_val_size: Option<AtomicI64>,
     keys_per_page: Integer,
     pub is_volatile: bool,
+
 }
 
-impl<K, V> MVMap<K, V> where K: Default + 'static,
-                             V: Default + 'static {
+impl<K, V> MVMap<K, V> where K: Default + 'static, V: Default + 'static {
     pub fn new(mv_store_ref: MVStoreRef,
                id: Integer,
                key_type: Arc<dyn DataType<K> + Send + Sync>,
                value_type: Arc<dyn DataType<V> + Send + Sync>) -> Result<MVMapRef<K, V>> {
-        let keys_per_page = h2_rust_cell_ref!(mv_store_ref).keys_per_page;
-        let current_version = h2_rust_cell_ref!(mv_store_ref).get_current_version();
+        let keys_per_page = get_ref!(mv_store_ref).keys_per_page;
+        let current_version = get_ref!(mv_store_ref).get_current_version();
         let mv_map_ref = Self::new1(mv_store_ref.clone(),
                                     key_type,
                                     value_type,
@@ -48,9 +49,9 @@ impl<K, V> MVMap<K, V> where K: Default + 'static,
                                     None,
                                     keys_per_page,
                                     false)?;
-        let mv_map = h2_rust_cell_ref_mutable!(mv_map_ref);
+        let mv_map = get_ref_mut!(mv_map_ref);
 
-        mv_map.set_initial_root(mv_map.create_empty_leaf(mv_map_ref.clone()), h2_rust_cell_ref!(mv_store_ref).get_current_version());
+        mv_map.set_initial_root(mv_map.create_empty_leaf(mv_map_ref.clone()), get_ref!(mv_store_ref).get_current_version());
 
         Ok(mv_map_ref.clone())
     }
@@ -87,12 +88,13 @@ impl<K, V> MVMap<K, V> where K: Default + 'static,
             mv_map.avg_val_size = Some(AtomicI64::new(0));
         }
 
+
         Ok(Some(Arc::new(H2RustCell::new(mv_map))))
     }
 
 
-    fn create_empty_leaf(&self, mv_map_ref: MVMapRef<K, V>) -> PageTraitRef<K, V> {
-        Page::<K, V>::create_empty_leaf(mv_map_ref)
+    fn create_empty_leaf(&self, this: MVMapRef<K, V>) -> PageTraitRef<K, V> {
+        Page::<K, V>::create_empty_leaf(this)
     }
 
     pub fn is_persistent(&self) -> bool {
@@ -106,5 +108,23 @@ impl<K, V> MVMap<K, V> where K: Default + 'static,
     fn set_root_reference(&mut self, root_reference: RootReferenceRef<K, V>) {
         self.root_reference_set_mutex.lock().unwrap();
         self.root_reference = root_reference;
+    }
+
+    /// set the position of the root page.
+    pub fn set_root_pos(&self, root_pos: Long, version: Long, this: MVMapRef<K, V>) {
+        let root: PageTraitRef<K, V> = self.read_or_create_root_page(root_pos, this);
+    }
+
+    fn read_or_create_root_page(&self, root_pos: Long, this: MVMapRef<K, V>) -> PageTraitRef<K, V> {
+        if root_pos == 0 {
+            self.create_empty_leaf(this)
+        } else {
+            self.read_page(this, root_pos).unwrap()
+        };
+        todo!()
+    }
+
+    fn read_page(&self, this: MVMapRef<K, V>, position: Long) -> Result<PageTraitRef<K, V>> {
+        get_ref!(self.mv_store).read_page::<K, V>(this, position)
     }
 }

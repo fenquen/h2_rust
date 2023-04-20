@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
-use crate::{build_h2_rust_cell, h2_rust_cell_ref, h2_rust_cell_ref_mutable};
+use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
 use crate::h2_rust_common::{Nullable, VecRef};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
@@ -30,9 +30,9 @@ impl Store {
     pub fn init(store_ref: StoreRef,
                 database_ref: DatabaseRef,
                 encryption_key: VecRef<u8>) -> Result<()> {
-        let this = h2_rust_cell_ref_mutable!(store_ref);
+        let this = get_ref_mut!(store_ref);
 
-        let database = h2_rust_cell_ref!(database_ref);
+        let database = get_ref!(database_ref);
 
         let database_path = database.get_database_path()?;
         let mut mv_store_builder = MVStoreBuilder::new();

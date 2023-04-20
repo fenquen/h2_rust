@@ -16,6 +16,7 @@ pub fn parse_bool(s: &str, default_value: bool, throw_exception: bool) -> Result
             if s.eq("1") || s.eq_ignore_ascii_case("t") || s.eq_ignore_ascii_case("y") {
                 return Ok(true);
             }
+
             if s.eq("0") || s.eq_ignore_ascii_case("f") || s.eq_ignore_ascii_case("n") {
                 return Ok(false);
             }

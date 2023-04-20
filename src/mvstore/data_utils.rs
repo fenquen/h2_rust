@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
 use crate::api::error_code;
-use crate::h2_rust_common::{h2_rust_utils, Integer};
+use crate::h2_rust_common::{h2_rust_utils, Integer, Long};
 use crate::message::db_error::DbError;
 use crate::throw;
 
@@ -37,4 +37,10 @@ pub fn check_argument(test: bool, message: &str) -> Result<()> {
         throw!(DbError::get(error_code::GENERAL_ERROR_1,vec![message]));
     }
     Ok(())
+}
+
+
+
+pub fn is_page_saved(position:Long) ->bool{
+    (position & !1) != 0
 }

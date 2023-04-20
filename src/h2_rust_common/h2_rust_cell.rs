@@ -13,10 +13,12 @@ impl<T> H2RustCell<T> {
 }
 
 impl<T: ?Sized> H2RustCell<T> {
+    #[inline]
     pub fn get_ref(&self) -> &T {
         unsafe { &*self.data.get() }
     }
 
+    #[inline]
     pub fn get_ref_mut(&self) -> &mut T {
         unsafe { &mut *self.data.get() }
     }
@@ -92,7 +94,7 @@ macro_rules! h2_rust_cell_mut_call {
 }
 
 #[macro_export]
-macro_rules! h2_rust_cell_ref {
+macro_rules! get_ref {
     ($h2_rust_cell_option:ident) => {
         $h2_rust_cell_option.as_ref().unwrap().get_ref()
     };
@@ -103,7 +105,7 @@ macro_rules! h2_rust_cell_ref {
 }
 
 #[macro_export]
-macro_rules! h2_rust_cell_ref_mutable {
+macro_rules! get_ref_mut {
     ($h2_rust_cell_option:ident) => {
         $h2_rust_cell_option.as_ref().unwrap().get_ref_mut()
     };
