@@ -51,7 +51,7 @@ pub struct MVStore {
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
 
-    page_cache: Option<CacheLongKeyLIRS<PageTraitRef<Arc<dyn Any>, Arc<dyn Any>>>>,
+    page_cache: Option<CacheLongKeyLIRS<PageTraitRef>>,
     chunk_cache: Option<CacheLongKeyLIRS<Option<Arc<Vec<Long>>>>>,
 
     pg_split_size: Integer,
@@ -60,7 +60,7 @@ pub struct MVStore {
 
     /// The layout map, Contains chunks metadata and root locations for all maps
     /// This is relatively fast changing part of metadata
-    layout: MVMapRef<String, String>,
+    layout: MVMapRef,
 
     current_version: AtomicI64,
 
@@ -229,25 +229,31 @@ impl MVStore {
         }
     }
 
-    pub fn read_page<K, V>(&self, mv_map: MVMapRef<K, V>, position: Long) -> Result<PageTraitRef<K, V>> {
+    pub fn read_page(&mut self, mv_map: MVMapRef, position: Long) -> Result<PageTraitRef> {
         if !data_utils::is_page_saved(position) { // position不能是0
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
 
-        let a = self.read_page_from_cache::<K, V>(position);
+        let page_ref = self.read_page_from_cache(position);
+        if page_ref.is_none() {
+            let chunk_ref = self.get_chunk(position);
+        }
 
         todo!()
     }
 
-    fn read_page_from_cache<K, V>(&self, position: Long) -> PageTraitRef<K, V> {
+    fn read_page_from_cache(&mut self, position: Long) -> PageTraitRef {
         if self.page_cache.is_none() {
-            // None
+            None
         } else {
+            self.page_cache.as_mut().unwrap().get(position)
+        }
+    }
 
-          //  (Page < K, V >)self.page_cache.get(position)
-        };
+    fn get_chunk(&self, position: Long) -> ChunkRef {
+        let chunk_id = data_utils::get_page_chunk_id(position);
 
-
+        let chunk = self.chunk_id_chunk.get(chunkId);
         todo!()
     }
 }

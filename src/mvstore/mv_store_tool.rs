@@ -17,5 +17,6 @@ pub fn compact_clean_up(file_path: &str) -> Result<()> {
             file_utils::move1(&new_path, &file_path)?;
         }
     }
+
     Ok(())
 }

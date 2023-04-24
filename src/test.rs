@@ -725,7 +725,7 @@ fn test_cast() {
          }
      }*/
 
-    impl<T: Debug> ContainerTrait<T> for Container<T> {
+    impl<T> ContainerTrait<T> for Container<T> {
         fn show(&self, t: T) {
             todo!()
         }
@@ -739,10 +739,10 @@ fn test_cast() {
         pub fn cast<T>(&self) {}
     }
 
-    let a = Arc::new(User::default()) as Arc<dyn Any>;
+    let a = Arc::new(User::default());//as Arc<dyn Any>;
 
 
-    //let object = Arc::new(H2RustCell::new(Container(a))) as Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>;
+    let object = Arc::new(H2RustCell::new(Container(a))) as Arc<H2RustCell<dyn ContainerTrait<Arc<User>>>>;
 
     fn cast<T>(object: Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>) {
         let a = object.get_ref();
@@ -751,8 +751,8 @@ fn test_cast() {
     //let container = Container(User::default());
     /// let container = &object as &dyn Any;
 
-    let a = &a as &dyn Any;
-    println!("{}", a.downcast_ref::<Arc<dyn Any>>().is_some());
+    // let a = &a as &dyn Any;
+    // println!("{}", a.downcast_ref::<Arc<dyn Any>>().is_some());
 
     // Option<Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>>>
 
@@ -770,12 +770,10 @@ fn test_cast() {
         }
     }
 
-    struct Toyota {
-
-    }
+    struct Toyota {}
 
     struct Reno {}
 
-    let a = Car::TOYOTA(Toyota{});
+    let a = Car::TOYOTA(Toyota {});
     a.run();
 }

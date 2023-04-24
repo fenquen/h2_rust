@@ -3,9 +3,10 @@ use bytebuffer::ByteBuffer;
 use crate::h2_rust_common::Integer;
 use crate::mvstore::write_buffer::WriteBuffer;
 use Ordering::{Equal, Greater, Less};
+use crate::h2_rust_common::h2_rust_type::H2RustType;
 
-pub trait DataType<T> {
-    fn compare(&self, a: &T, b: &T) -> Ordering;
+pub trait DataType {
+    fn compare(&self, a: &H2RustType, b: &H2RustType) -> Ordering;
 
     /// Perform binary search for the key within the storage
     ///
@@ -14,7 +15,7 @@ pub trait DataType<T> {
     /// @param size         number of data items in the storage
     /// @param initialGuess for key position
     /// @return index of the key , if found, - index of the insertion point, if not
-    fn binary_search(&self, key: &T, storage: &Vec<T>, size: Integer, initial_guess: Integer) -> Integer {
+    fn binary_search(&self, key: &H2RustType, storage: &Vec<H2RustType>, size: Integer, initial_guess: Integer) -> Integer {
         let mut low = 0;
         let mut high = size - 1;
 
@@ -41,7 +42,7 @@ pub trait DataType<T> {
     }
 
     /// Calculates the amount of used memory in bytes.
-    fn get_memory(&self, obj: T) -> Integer;
+    fn get_memory(&self, obj: &H2RustType) -> Integer;
 
     /// Whether memory estimation based on previously seen values is allowed/desirable
     fn is_memory_estimation_allowed(&self) -> bool {
@@ -52,14 +53,14 @@ pub trait DataType<T> {
     ///
     /// @param buff the target buffer
     /// @param obj  the value
-    fn write_2(&self, buff: &WriteBuffer, obj: &T);
+    fn write_2(&self, buff: &WriteBuffer, obj: &H2RustType);
 
     /// Write a list of objects.
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to write
-    fn write_3(&self, buff: &WriteBuffer, storage: &Vec<T>, len: Integer) {
+    fn write_3(&self, buff: &WriteBuffer, storage: &Vec<H2RustType>, len: Integer) {
         for a in 0..len as usize {
             self.write_2(&buff, &storage[a]);
         }
@@ -69,14 +70,14 @@ pub trait DataType<T> {
     ///
     /// @param buff the source buffer
     /// @return the object
-    fn read_1(&self, buff: &ByteBuffer) -> T;
+    fn read_1(&self, buff: &ByteBuffer) -> H2RustType;
 
     /// Read a list of objects.
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to read
-    fn read_3(&self, buff: &ByteBuffer, storage: &mut Vec<T>, len: Integer) {
+    fn read_3(&self, buff: &ByteBuffer, storage: &mut Vec<H2RustType>, len: Integer) {
         for a in 0..len as usize {
             storage[a] = self.read_1(&buff);
         }
@@ -86,5 +87,5 @@ pub trait DataType<T> {
     ///
     /// @param size number of values to hold
     /// @return storage object
-    fn create_storage(&self, size: Integer) -> Vec<T>;
+    fn create_storage(&self, size: Integer) -> Vec<H2RustType>;
 }

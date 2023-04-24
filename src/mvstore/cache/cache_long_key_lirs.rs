@@ -1,18 +1,22 @@
 use std::cmp;
 use std::env::var;
+use std::ops::Deref;
 use std::sync::Arc;
-use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
-use crate::h2_rust_common::{Integer, Long, Nullable};
+use usync::lock_api::RawMutex;
+use usync::ReentrantMutex;
+use crate::{build_h2_rust_cell, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_plus_plus, unsigned_right_shift};
+use crate::h2_rust_common::{Integer, Long, MyMutex, Nullable, Optional, ULong};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
 use crate::mvstore::page::Page;
+use crate::h2_rust_common::UInteger;
 
 #[derive(Default)]
 pub struct CacheLongKeyLIRS<V> {
     /// the maximum memory this cache should use.
     max_memory: Long,
-    segment_arr: Option<Vec<Segment<V>>>,
+    segment_arr: Option<Vec<SegmentRef<V>>>,
     segment_count: Integer,
     segment_shift: Integer,
     segment_mask: Integer,
@@ -21,7 +25,7 @@ pub struct CacheLongKeyLIRS<V> {
     non_resident_queue_size_high: Integer,
 }
 
-impl<V: Default + Clone> CacheLongKeyLIRS<V> {
+impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
     pub fn new(config: &CacheLongKeyLIRSConfig) -> CacheLongKeyLIRS<V> {
         let mut cache_long_key_lirs = CacheLongKeyLIRS::default();
         cache_long_key_lirs.init(config);
@@ -38,7 +42,7 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
 
         self.segment_mask = self.segment_count - 1;
         self.stack_move_distance = config.stack_move_distance;
-        self.segment_arr = Some(Vec::<Segment<V>>::with_capacity(self.segment_count as usize));
+        self.segment_arr = Some(Vec::<SegmentRef<V>>::with_capacity(self.segment_count as usize));
 
         self.clear();
 
@@ -53,8 +57,8 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         if self.segment_arr.is_some() {
             let segment_arr = self.segment_arr.as_mut().unwrap();
             let max = 1 + max_memory / segment_arr.len() as Long;
-            for segment in segment_arr {
-                segment.max_memory = max;
+            for segment_ref in segment_arr {
+                get_ref_mut!(segment_ref).max_memory = max;
             }
         }
     }
@@ -63,12 +67,12 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
         let max = self.get_max_item_size();
         let segment_arr = self.segment_arr.as_mut().unwrap();
         for _ in 0..self.segment_count {
-            segment_arr.push(Segment::<V>::new(
+            segment_arr.push(build_h2_rust_cell!(Segment::<V>::new(
                 max,
                 self.stack_move_distance,
                 8,
                 self.non_resident_queue_size,
-                self.non_resident_queue_size_high));
+                self.non_resident_queue_size_high)));
         }
     }
 
@@ -79,14 +83,33 @@ impl<V: Default + Clone> CacheLongKeyLIRS<V> {
 
     pub fn put(&mut self, key: Long, value: V, memory: Integer) {}
 
-    pub fn  get(&self, key:Long)->V {
-   // int hash = getHash(key);
-    //Segment<V> segment = getSegment(hash);
-   // Entry<V> entry = segment.find(key, hash);
-   // return segment.get(entry);
-        todo!()
+    pub fn get(&mut self, key: Long) -> V {
+        let hash = Self::get_hash(key);
+        let segment_ref = self.get_segment(hash);
+        let entry_ref = get_ref!(segment_ref).find(key, hash);
+        get_ref_mut!(segment_ref).get(entry_ref) // 因为该函数内部需要V上有Optional相应函数使得CacheLongKeyLIRS的V也要实现Optional,部下污染了上头
+    }
+
+    fn get_hash(key: Long) -> Integer {
+        let mut hash = ((key as ULong >> 32) as Long ^ key) as Integer;
+        // a supplemental secondary hash function to protect against hash codes that don't differ much
+        hash = unsigned_right_shift!(hash, 16, Integer);
+        hash = (unsigned_right_shift!(hash, 16, Integer) ^ hash) * 0x45d9f3b;
+        hash = (unsigned_right_shift!(hash, 16, Integer) ^ hash) * 0x45d9f3b;
+        hash = unsigned_right_shift!(hash, 16, Integer) ^ hash;
+        hash
+    }
+
+    fn get_segment(&self, hash: Integer) -> &SegmentRef<V> {
+        self.segment_arr.as_ref().unwrap().get(self.get_segment_index(hash) as usize).unwrap()
+    }
+
+    fn get_segment_index(&self, hash: Integer) -> Integer {
+        unsigned_right_shift!(hash, self.segment_shift, Integer) & self.segment_mask
     }
 }
+
+pub type SegmentRef<V> = Option<Arc<H2RustCell<Segment<V>>>>;
 
 #[derive(Default)]
 pub struct Segment<V> {
@@ -141,8 +164,7 @@ pub struct Segment<V> {
     /// The number of entries in the stack.
     stack_size: Integer,
 
-    /// The queue of resident cold entries.
-    ///
+    /// The queue of resident cold entries <br>
     /// There is always at least one entry: the head entry.
     queue: EntryRef<V>,
 
@@ -152,12 +174,15 @@ pub struct Segment<V> {
     queue2: EntryRef<V>,
 
     /// The number of times any item was moved to the top of the stack.
-    stack_move_counter: Integer,
+    stack_move_round_count: Integer,
+
+    reentrant_mutex: ReentrantMutex<()>,
+
+    miss_count: Integer,
+    hit_count: Integer,
 }
 
-pub type SegmentRef<V> = Option<Arc<H2RustCell<Segment<V>>>>;
-
-impl<V: Default + Clone> Segment<V> {
+impl<V: Default + Clone + Optional> Segment<V> {
     pub fn new(max_memory: Long,
                stack_move_distance: Integer,
                len: Integer,
@@ -196,7 +221,178 @@ impl<V: Default + Clone> Segment<V> {
         ref_mut.queue_prev = self.queue2.clone();
         ref_mut.queue_next = self.queue2.clone();
 
-        self.entries = Vec::with_capacity(len as usize);
+        self.entries = Vec::<EntryRef<V>>::with_capacity(len as usize);
+        self.entries.fill(None);
+    }
+
+    pub fn find(&self, key: Long, hash: Integer) -> EntryRef<V> {
+        let index = hash & self.mask;
+        // entries的大小是和mask联动的 mask=len-1 故烦心在get后unwrap
+        let mut entry_ref = self.entries.get(index as usize).unwrap();
+        while entry_ref.is_some() && get_ref!(entry_ref).key != key {
+            entry_ref = &get_ref!(entry_ref).map_next;
+        }
+
+        entry_ref.clone()
+    }
+
+    pub fn get(&mut self, entry_ref: EntryRef<V>) -> V {
+        unsafe { self.reentrant_mutex.raw().lock(); };
+        // let mutex = self.reentrant_mutex.lock();
+
+        let value = if entry_ref.is_none() {
+            V::default() // 通过default()生成None
+        } else {
+            get_ref!(entry_ref).get_value()
+        };
+
+        // the entry was not found, or it was a non-resident entry
+        if value.is_none() {
+            suffix_plus_plus!(self.miss_count);
+        } else {
+            self.access(entry_ref);
+            suffix_plus_plus!(self.hit_count);
+        }
+
+        unsafe { self.reentrant_mutex.raw().unlock(); };
+
+        return value;
+    }
+
+    fn access(&mut self, entry_ref: EntryRef<V>) {
+        let entry = get_ref!(entry_ref);
+        if entry.is_hot() { // stack体系动手
+            if h2_rust_cell_equals!(entry_ref, get_ref!(self.stack).stack_next) && entry.stack_next.is_some() {
+                if self.stack_move_round_count - entry.top_move > self.stack_move_distance {
+                    // move a hot entry to the top of the stack unless it is already there
+                    let was_end = h2_rust_cell_equals!(entry_ref, get_ref!(self.stack).stack_prev);
+
+                    self.remove_from_stack(entry_ref.clone());
+
+                    if was_end {
+                        self.prune_stack();
+                    }
+
+                    self.add_to_stack(entry_ref);
+                }
+            }
+        } else { // queue体系动手
+            let value = entry.get_value();
+            if value.is_none() {
+                return;
+            }
+
+            self.remove_from_queue(entry_ref.clone());
+
+            if entry.stack_next.is_some() {
+                // resident, or even non-resident (weak value reference),
+                // cold entries become hot if they are on the stack
+                self.remove_from_stack(entry_ref.clone());
+
+                // which means a hot entry needs to become cold
+                // (this entry is cold, that means there is at least one
+                // more entry in the stack, which must be hot)
+                self.convert_oldest_hot_to_cold();
+            } else {
+                // cold entries that are not on the stack move to the front of the queue
+                self.add_to_queue(self.queue.clone(), entry_ref.clone());
+
+                // in any case, the cold entry is moved to the top of the stack
+                self.add_to_stack(entry_ref.clone());
+
+                // but if newly promoted cold/non-resident is the only entry on a stack now
+                // that means last one is cold, need to prune
+                self.prune_stack();
+            }
+        }
+    }
+
+    /// Remove the entry from the stack. The head itself must not be removed.
+    fn remove_from_stack(&mut self, entry_ref: EntryRef<V>) {
+        let entry = get_ref_mut!(entry_ref);
+        get_ref_mut!(entry.stack_prev).stack_next = entry.stack_next.clone();
+        get_ref_mut!(entry.stack_next).stack_prev = entry.stack_prev.clone();
+        entry.stack_prev = None;
+        entry.stack_next = None;
+        self.stack_size = self.stack_size - 1;
+    }
+
+    /// Ensure the last entry of the stack is cold.
+    fn prune_stack(&mut self) {
+        loop {
+            let last = get_ref!(self.stack).stack_prev.clone();
+
+            // must stop at a hot entry or the stack head,
+            // but the stack head itself is also hot, so we don't have to test it
+            if get_ref!(last).is_hot() {
+                break;
+            }
+
+            // the cold entry is still in the queue
+            self.remove_from_stack(last);
+        }
+    }
+
+    fn add_to_stack(&mut self, entry_ref: EntryRef<V>) {
+        let entry = get_ref_mut!(entry_ref);
+
+        entry.stack_prev = self.stack.clone();
+        entry.stack_next = get_ref!(self.stack).stack_next.clone();
+        get_ref_mut!(entry.stack_next).stack_prev = entry_ref.clone();
+
+        get_ref_mut!(self.stack).stack_next = entry_ref.clone();
+        self.stack_size = self.stack_size + 1;
+
+        entry.top_move = self.stack_move_round_count;
+        self.stack_move_round_count = self.stack_move_round_count + 1;
+    }
+
+    fn remove_from_queue(&mut self, entry_ref: EntryRef<V>) {
+        let entry = get_ref_mut!(entry_ref);
+
+        get_ref_mut!(entry.queue_prev).queue_next = entry.queue_next.clone();
+        get_ref_mut!(entry.queue_next).queue_prev = entry.queue_prev.clone();
+        entry.queue_prev = None;
+        entry.queue_next = None;
+
+        if entry.value.is_some() {
+            self.queue_size = self.queue_size - 1;
+        } else {
+            self.queue2size = self.queue2size - 1;
+        }
+    }
+
+    fn convert_oldest_hot_to_cold(&mut self) {
+        // the last entry of the stack is known to be hot
+        let last = get_ref!(self.stack).stack_prev.clone();
+
+        // never remove the stack head itself,mean the internal structure of the cache is corrupt
+        if h2_rust_cell_equals!(last, self.stack) {
+            panic!(" last == stack");
+        }
+
+        // remove from stack - which is done anyway in the stack pruning,but we can do it here as well
+        self.remove_from_stack(last.clone());
+
+        // adding an entry to the queue will make it cold
+        self.add_to_queue(self.queue.clone(), last);
+
+        self.prune_stack();
+    }
+
+    fn add_to_queue(&mut self, queue: EntryRef<V>, entry_ref: EntryRef<V>) {
+        let entry = get_ref_mut!(entry_ref);
+
+        entry.queue_prev = queue.clone();
+        entry.queue_next = get_ref!(queue).queue_next.clone();
+        get_ref_mut!(entry.queue_next).queue_prev = entry_ref.clone();
+        get_ref_mut!(queue).queue_next = entry_ref.clone();
+
+        if entry.value.is_some() {
+            suffix_plus_plus!(self.queue_size);
+        } else {
+            suffix_plus_plus!(self.queue2size);
+        }
     }
 }
 
@@ -205,7 +401,7 @@ pub type EntryRef<V> = Option<Arc<H2RustCell<Entry<V>>>>;
 #[derive(Default)]
 pub struct Entry<V> {
     /// The key
-    key: Long,
+    pub key: Long,
 
     /// The value. Set to null for non-resident-cold entries.
     value: V,
@@ -235,7 +431,7 @@ pub struct Entry<V> {
     map_next: EntryRef<V>,
 }
 
-impl<V: Default + Clone> Entry<V> {
+impl<V: Default + Clone + Optional> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
         build_h2_rust_cell!(Entry::default())
     }

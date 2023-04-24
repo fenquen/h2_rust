@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::mem;
 
 pub struct H2RustCell<T: ?Sized> {
     data: UnsafeCell<T>,
@@ -22,6 +23,23 @@ impl<T: ?Sized> H2RustCell<T> {
     pub fn get_ref_mut(&self) -> &mut T {
         unsafe { &mut *self.data.get() }
     }
+
+    #[inline]
+    pub fn get_addr(&self) -> usize {
+        self.data.get() as *const () as usize
+    }
+
+    #[inline]
+    pub fn equals(&self, other: &H2RustCell<T>) -> bool {
+        self.get_addr() == other.get_addr()
+    }
+}
+
+#[macro_export]
+macro_rules! h2_rust_cell_equals {
+    ($self:expr, $other:expr) => {
+        $self.as_ref().unwrap().equals($other.as_ref().unwrap())
+    };
 }
 
 unsafe impl<T: ?Sized> Send for H2RustCell<T> {}

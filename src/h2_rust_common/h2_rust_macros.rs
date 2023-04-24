@@ -18,17 +18,33 @@ macro_rules! throw {
 
 #[macro_export]
 macro_rules! enum_str {
-    (pub enum $name:ident {
-        $($variant:ident),*,
+    (pub enum $type_name:ident {
+        $($enum_name:ident),*,
     }) => {
-       pub enum $name {
-            $($variant),*
+        pub enum $type_name {
+            $($enum_name),*
         }
 
-        impl $name {
+        impl $type_name {
            pub fn name(&self) -> &'static str {
                 match self {
-                    $($name::$variant => stringify!($variant)),*
+                    $($type_name::$enum_name => stringify!($enum_name)),*
+                }
+            }
+        }
+    };
+
+     (pub enum $type_name:ident {
+        $($enum_name:ident($value:ident)),*,
+    }) => {
+        pub enum $type_name {
+            $($enum_name($value)),*
+        }
+
+        impl $type_name {
+           pub fn name(&self) -> &'static str {
+                match self {
+                    $($type_name::$enum_name(_) => stringify!($enum_name)),*
                 }
             }
         }
@@ -114,12 +130,34 @@ macro_rules! atomic_ref_cell_mut {
     };
 }
 
-
-macro_rules! unsigned_right_shit {
-    ($number:expr,$shift:expr) => {
-        $number as u64 >> $shift
+#[macro_export]
+macro_rules! unsigned_right_shift {
+    ($number:expr, $shift:expr, $type_name:ident) => {
+        ($number as concat_idents!(U, $type_name) >> $shift) as $type_name
     };
 }
+
+#[macro_export]
+macro_rules! prefix_plus_plus {
+    ($expr:expr) => {
+        {
+            $expr = $expr + 1;
+            $expr
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! suffix_plus_plus {
+    ($expr:expr) => {
+        {
+            let old = $expr;
+            $expr = $expr + 1;
+            old
+        }
+    };
+}
+
 mod test {
     use std::sync::Arc;
     use atomic_refcell::AtomicRefCell;

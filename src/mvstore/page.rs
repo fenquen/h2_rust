@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::engine::constant;
 use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::Integer;
 use crate::mvstore::mv_map::MVMapRef;
 
@@ -30,25 +31,24 @@ const PAGE_LEAF_MEMORY: Integer = PAGE_MEMORY +  // super
 
 const IN_MEMORY: Integer = Integer::MIN;
 
-pub type PageTraitRef<K, V> = Option<Arc<H2RustCell<dyn PageTrait<K, V>>>>;
+pub type PageTraitRef = Option<Arc<H2RustCell<dyn PageTrait>>>;
 
-type PageRef<K, V> = Option<Arc<H2RustCell<Page<K, V>>>>;
+type PageRef = Option<Arc<H2RustCell<Page>>>;
 
-pub trait PageTrait<K, V> {
+pub trait PageTrait {
     fn init_memory_account(&mut self, memory_count: Integer);
 }
 
 #[derive(Default)]
-pub struct Page<K, V> {
-    pub mv_map: MVMapRef<K, V>,
+pub struct Page {
+    pub mv_map: MVMapRef,
     /// The estimated memory used in persistent case, IN_MEMORY marker value otherwise.
     memory: Integer,
-    keys: Vec<K>,
+    keys: Vec<H2RustType>,
 }
 
-impl<K: Default, V: Default> Page<K, V> {
-    pub fn create_empty_leaf<K1, V1>(mv_map_ref: MVMapRef<K1, V1>) -> PageTraitRef<K1, V1> where K1: Default + 'static,
-                                                                                                 V1: Default + 'static {
+impl Page {
+    pub fn create_empty_leaf(mv_map_ref: MVMapRef) -> PageTraitRef {
         let mv_map = get_ref!(mv_map_ref);
 
         let keys = mv_map.key_type.as_ref().unwrap().create_storage(0);
@@ -62,16 +62,15 @@ impl<K: Default, V: Default> Page<K, V> {
                           PAGE_LEAF_MEMORY)
     }
 
-    pub fn create_leaf<K1, V1>(mv_map_ref: MVMapRef<K1, V1>,
-                               keys: Vec<K1>,
-                               values: Vec<V1>,
-                               memory: Integer) -> PageTraitRef<K1, V1> where K1: Default + 'static,
-                                                                              V1: Default + 'static {
+    pub fn create_leaf(mv_map_ref: MVMapRef,
+                               keys: Vec<H2RustType>,
+                               values: Vec<H2RustType>,
+                               memory: Integer) -> PageTraitRef {
         assert!(mv_map_ref.is_some());
-        let page_ref = Some(Arc::new(H2RustCell::new(Page::<K1, V1>::default())));
+        let page_ref = Some(Arc::new(H2RustCell::new(Page::default())));
         let mut leaf = Leaf::new(page_ref, mv_map_ref, keys, values);
         leaf.init_memory_account(memory);
-        let page_trait_ref = Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait<K1, V1>>>;
+        let page_trait_ref = Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait>>;
         Some(page_trait_ref)
     }
 
@@ -104,7 +103,7 @@ impl<K: Default, V: Default> Page<K, V> {
     }
 }
 
-impl<K, V> PageTrait<K, V> for Page<K, V> where K: Default + 'static, V: Default + 'static {
+impl PageTrait for Page {
     /// 要在trait上
     fn init_memory_account(&mut self, memory_count: Integer) {
         if !h2_rust_cell_call!(self.mv_map, is_persistent) {
@@ -118,18 +117,18 @@ impl<K, V> PageTrait<K, V> for Page<K, V> where K: Default + 'static, V: Default
     }
 }
 
-pub type LeafRef<K, V> = Option<Arc<H2RustCell<Leaf<K, V>>>>;
+pub type LeafRef = Option<Arc<H2RustCell<Leaf>>>;
 
-pub struct Leaf<K, V> {
-    pub page: PageRef<K, V>,
-    pub values: Vec<V>,
+pub struct Leaf {
+    pub page: PageRef,
+    pub values: Vec<H2RustType>,
 }
 
-impl<K, V> Leaf<K, V> {
-    pub fn new(page_ref: PageRef<K, V>,
-               mv_map_ref: MVMapRef<K, V>,
-               keys: Vec<K>,
-               values: Vec<V>) -> Leaf<K, V> {
+impl Leaf {
+    pub fn new(page_ref: PageRef,
+               mv_map_ref: MVMapRef,
+               keys: Vec<H2RustType>,
+               values: Vec<H2RustType>) -> Leaf {
         {
             let mut atomic_ref_mut = page_ref.as_ref().unwrap().get_ref_mut();
             atomic_ref_mut.mv_map = mv_map_ref;
@@ -145,7 +144,7 @@ impl<K, V> Leaf<K, V> {
     }
 }
 
-impl<K, V> PageTrait<K, V> for Leaf<K, V> where K: Default + 'static, V: Default + 'static {
+impl PageTrait for Leaf {
     fn init_memory_account(&mut self, memory_count: Integer) {
         h2_rust_cell_mut_call!(self.page, init_memory_account, memory_count);
     }

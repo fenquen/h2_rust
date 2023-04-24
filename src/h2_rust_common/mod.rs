@@ -10,15 +10,18 @@ use crate::api::error_code;
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 
-pub mod macros;
+pub mod h2_rust_macros;
 pub mod h2_rust_utils;
 pub mod h2_rust_constant;
 pub mod file_lock;
 pub mod h2_rust_cell;
+pub mod h2_rust_type;
 
 pub type Properties = HashMap<String, String>;
 pub type Integer = i32;
+pub type UInteger = u32;
 pub type Long = i64;
+pub type ULong = u64;
 pub type Byte = i8;
 
 pub type VecRef<T> = Option<Arc<Vec<T>>>;
@@ -115,5 +118,19 @@ impl<T> MyMutex<T> {
 impl<'a, T: ?Sized + 'a> Drop for MyMutexGuard<'a, T> {
     fn drop(&mut self) {
         self.owner_thread_id.store(0, Ordering::Release);
+    }
+}
+
+pub trait Optional {
+    fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+
+    fn is_some(&self) -> bool;
+}
+
+impl<T> Optional for Option<T> {
+    fn is_some(&self) -> bool {
+        self.is_some()
     }
 }

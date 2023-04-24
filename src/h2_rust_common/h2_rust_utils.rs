@@ -34,8 +34,6 @@ pub fn add_all(a: &mut HashSet<String>, b: &[impl ToString]) {
     }
 }
 
-pub fn a() {}
-
 /// 对应了java的Integer.decode()
 pub fn integer_decode(s: &str) -> Result<Integer> {
     let mut negative = false;
