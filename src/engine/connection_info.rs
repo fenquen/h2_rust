@@ -19,12 +19,16 @@ use crate::store::fs::file_utils;
 use crate::util::{io_utils, string_utils, utils};
 
 static COMMON_SETTINGS: [&str; 12] = [
-    "ACCESS_MODE_DATA", "AUTO_RECONNECT", "AUTO_SERVER", "AUTO_SERVER_PORT",
+    "ACCESS_MODE_DATA",
+    "AUTO_RECONNECT",
+    "AUTO_SERVER",
+    "AUTO_SERVER_PORT",
     "CACHE_TYPE",
     "FILE_LOCK",
     "JMX",
     "NETWORK_TIMEOUT",
-    "OLD_INFORMATION_SCHEMA", "OPEN_NEW",
+    "OLD_INFORMATION_SCHEMA",
+    "OPEN_NEW",
     "PAGE_SIZE",
     "RECOVER"];
 
@@ -90,7 +94,7 @@ pub struct ConnectionInfo {
     pub unnamed_in_memory: bool,
     pub user_password_hash: VecRef<u8>,
     pub file_password_hash: VecRef<u8>,
-    pub file_encryption_key:VecRef<u8>,
+    pub file_encryption_key: VecRef<u8>,
 }
 
 impl ConnectionInfo {

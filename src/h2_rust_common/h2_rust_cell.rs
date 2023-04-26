@@ -14,6 +14,7 @@ impl<T> H2RustCell<T> {
 }
 
 impl<T: ?Sized> H2RustCell<T> {
+
     #[inline]
     pub fn get_ref(&self) -> &T {
         unsafe { &*self.data.get() }

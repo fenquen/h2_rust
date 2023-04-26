@@ -6,3 +6,12 @@ enum_str! {pub enum H2RustType {
     Integer(Integer),
 }}
 
+impl H2RustType {
+    pub fn cast_string(&self) -> H2RustType {
+        match self {
+            Self::String(s) => { Self::String(s.clone()) }
+            _ => { panic!() }
+        }
+    }
+}
+

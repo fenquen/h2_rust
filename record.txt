@@ -2,3 +2,9 @@
     子类通过包含的方式来继承父类
     父类和子类都使用trait对外显示,
     用到的父类.field使用trait的get函数替换
+
+refCell替换内部
+    use std::cell::RefCell;
+    let c = RefCell::new("hello".to_owned());
+    *c.borrow_mut() = "bonjour".to_owned();
+    assert_eq!(&*c.borrow(), "bonjour");

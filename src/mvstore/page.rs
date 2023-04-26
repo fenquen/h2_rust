@@ -3,11 +3,11 @@ use anyhow::Result;
 use std::ops::Deref;
 use std::sync::Arc;
 use crate::engine::constant;
-use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref};
+use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref, get_ref_mut};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::Integer;
-use crate::mvstore::mv_map::MVMapRef;
+use crate::mvstore::mv_map::MVMapSharedPtr;
 
 /// The estimated number of bytes used per child entry.
 const PAGE_MEMORY_CHILD: Integer = constant::MEMORY_POINTER + 16; //  16 = two longs
@@ -37,18 +37,26 @@ type PageRef = Option<Arc<H2RustCell<Page>>>;
 
 pub trait PageTrait {
     fn init_memory_account(&mut self, memory_count: Integer);
+
+    fn binary_search(&mut self, key: H2RustType) -> Integer;
+
+    fn get_key_count(&self) -> Integer;
 }
 
 #[derive(Default)]
 pub struct Page {
-    pub mv_map: MVMapRef,
+    pub mv_map: MVMapSharedPtr,
+
     /// The estimated memory used in persistent case, IN_MEMORY marker value otherwise.
     memory: Integer,
     keys: Vec<H2RustType>,
+
+    /// The last result of a find operation is cached.
+    cached_compare: Integer,
 }
 
 impl Page {
-    pub fn create_empty_leaf(mv_map_ref: MVMapRef) -> PageTraitRef {
+    pub fn create_empty_leaf(mv_map_ref: MVMapSharedPtr) -> PageTraitRef {
         let mv_map = get_ref!(mv_map_ref);
 
         let keys = mv_map.key_type.as_ref().unwrap().create_storage(0);
@@ -62,10 +70,10 @@ impl Page {
                           PAGE_LEAF_MEMORY)
     }
 
-    pub fn create_leaf(mv_map_ref: MVMapRef,
-                               keys: Vec<H2RustType>,
-                               values: Vec<H2RustType>,
-                               memory: Integer) -> PageTraitRef {
+    pub fn create_leaf(mv_map_ref: MVMapSharedPtr,
+                       keys: Vec<H2RustType>,
+                       values: Vec<H2RustType>,
+                       memory: Integer) -> PageTraitRef {
         assert!(mv_map_ref.is_some());
         let page_ref = Some(Arc::new(H2RustCell::new(Page::default())));
         let mut leaf = Leaf::new(page_ref, mv_map_ref, keys, values);
@@ -99,8 +107,14 @@ impl Page {
         if self.is_persistent() {
             return self.memory;
         }
+
         0
     }
+}
+
+pub fn get(page_trait_ref: PageTraitRef, key: H2RustType) -> H2RustType {
+    let index = get_ref_mut!(page_trait_ref).binary_search(key);
+    todo!()
 }
 
 impl PageTrait for Page {
@@ -115,6 +129,22 @@ impl PageTrait for Page {
             assert_eq!(memory_count, self.get_memory());
         }
     }
+
+    fn binary_search(&mut self, key: H2RustType) -> Integer {
+        let mv_map = get_ref!(self.mv_map);
+        let ket_type = mv_map.get_key_type();
+        let res = ket_type.binary_search(&key, &self.keys, self.get_key_count(), self.cached_compare);
+        self.cached_compare = if res < 0 {
+            !res
+        } else {
+            res + 1
+        };
+        res
+    }
+
+    fn get_key_count(&self) -> Integer {
+        self.keys.len() as Integer
+    }
 }
 
 pub type LeafRef = Option<Arc<H2RustCell<Leaf>>>;
@@ -126,7 +156,7 @@ pub struct Leaf {
 
 impl Leaf {
     pub fn new(page_ref: PageRef,
-               mv_map_ref: MVMapRef,
+               mv_map_ref: MVMapSharedPtr,
                keys: Vec<H2RustType>,
                values: Vec<H2RustType>) -> Leaf {
         {
@@ -146,6 +176,14 @@ impl Leaf {
 
 impl PageTrait for Leaf {
     fn init_memory_account(&mut self, memory_count: Integer) {
-        h2_rust_cell_mut_call!(self.page, init_memory_account, memory_count);
+        get_ref_mut!(self.page).init_memory_account(memory_count);
+    }
+
+    fn binary_search(&mut self, key: H2RustType) -> Integer {
+        get_ref_mut!(self.page).binary_search(key)
+    }
+
+    fn get_key_count(&self) -> Integer {
+        todo!()
     }
 }

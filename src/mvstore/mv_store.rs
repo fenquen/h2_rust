@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicPtr, Ordering};
 use std::thread;
 use std::time::{Instant, SystemTime};
@@ -11,13 +11,16 @@ use dashmap::DashMap;
 use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
-use crate::mvstore::data_utils;
+use crate::mvstore::{chunk, data_utils};
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
-use crate::mvstore::mv_map::{MVMap, MVMapRef};
+use crate::mvstore::mv_map::{MVMap, MVMapSharedPtr};
 use crate::mvstore::page::{Page, PageTraitRef};
 use crate::mvstore::r#type::string_data_type;
 use crate::{h2_rust_cell_call, atomic_ref_cell, atomic_ref_cell_mut, h2_rust_cell_mut_call, get_ref_mut, build_h2_rust_cell, get_ref, throw};
+use crate::api::error_code;
+use crate::db::store;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::message::db_error;
 use crate::message::db_error::DbError;
 use crate::mvstore::chunk::{Chunk, ChunkRef};
@@ -44,6 +47,15 @@ const FORMAT_READ_MAX: Integer = 2;
 /// This designates the "last stored" version for a store which was just open for the first time.
 const INITIAL_VERSION: Long = -1;
 
+
+/// Store is about to close now, but is still operational.<br>
+/// Outstanding store operation by background writer or other thread may be in progress.<br>
+/// New updates must not be initiated, unless they are part of a closing procedure itself.
+const STATE_STOPPING: Integer = 1;
+
+pub type MVStoreRef = Option<Arc<H2RustCell<MVStore>>>;
+pub type MVStoreWeakPtr = Weak<H2RustCell<MVStore>>;
+
 #[derive(Default)]
 pub struct MVStore {
     recovery_mode: bool,
@@ -60,7 +72,7 @@ pub struct MVStore {
 
     /// The layout map, Contains chunks metadata and root locations for all maps
     /// This is relatively fast changing part of metadata
-    layout: MVMapRef,
+    layout: MVMapSharedPtr,
 
     current_version: AtomicI64,
 
@@ -82,39 +94,39 @@ pub struct MVStore {
     chunk_id_chunk: DashMap<Integer, ChunkRef>,
     last_chunk_id: Integer,
     last_map_id: AtomicI32,
-}
 
-pub type MVStoreRef = Option<Arc<H2RustCell<MVStore>>>;
+    state: AtomicI32,
+}
 
 impl MVStore {
     pub fn new(config: &mut HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
-        let this = build_h2_rust_cell!(MVStore::default());
-        Self::init(this.clone(), config)?;
+        let mv_store_ref = build_h2_rust_cell!(MVStore::default());
+        Self::init(mv_store_ref.clone(), config)?;
 
-        Ok(this)
+        Ok(mv_store_ref)
     }
 
-    fn init(mv_store_ref: MVStoreRef, config: &mut HashMap<String, Box<dyn Any>>) -> Result<()> {
+    fn init(mvStoreSharedPtr: MVStoreRef, config: &mut HashMap<String, Box<dyn Any>>) -> Result<()> {
         // 为什么要区分this 和 this_mut的原因是 this.store_lock.lock() 然后调用 this_mut.set_last_chunk(None) 会报错在可变引用的时候进行不可变引用
-        let this = get_ref!(mv_store_ref);
-        let this_mut = get_ref_mut!(mv_store_ref);
+        let mvStoreRef = get_ref!(mvStoreSharedPtr);
+        let mvStoreMutRef = get_ref_mut!(mvStoreSharedPtr);
 
-        this_mut.recovery_mode = config.contains_key("recoveryMode");
-        this_mut.compression_level = data_utils::get_config_int_param(&config, "compress", 0);
+        mvStoreMutRef.recovery_mode = config.contains_key("recoveryMode");
+        mvStoreMutRef.compression_level = data_utils::get_config_int_param(&config, "compress", 0);
         let file_name = h2_rust_utils::get_from_map::<String>(config, "fileName");
 
         let mut file_store_shall_be_open = false;
         if file_name.is_some() {
-            this_mut.file_store = FileStore::new()?;
+            mvStoreMutRef.file_store = FileStore::new()?;
             file_store_shall_be_open = true;
         }
-        this_mut.file_store_shall_be_closed = true;
+        mvStoreMutRef.file_store_shall_be_closed = true;
 
         // cache体系
-        let mut pg_split_size = 48; // for "mem:" case it is # of keys
+        let mut pgSplitSize = 48; // for "mem:" case it is # of keys
         let mut page_cache_config: Option<CacheLongKeyLIRSConfig> = None;
         let mut chunk_cache_config: Option<CacheLongKeyLIRSConfig> = None;
-        if this_mut.file_store.is_some() {
+        if mvStoreMutRef.file_store.is_some() {
             let cache_size = data_utils::get_config_int_param(config, "cacheSize", 16);
             if cache_size > 0 {
                 page_cache_config = Some(CacheLongKeyLIRSConfig::new());
@@ -126,66 +138,67 @@ impl MVStore {
             }
             chunk_cache_config = Some(CacheLongKeyLIRSConfig::new());
             chunk_cache_config.as_mut().unwrap().max_memory = 1024 * 1024;
-            pg_split_size = 16 * 1024;
+            pgSplitSize = 16 * 1024;
         }
         if page_cache_config.is_some() {
-            this_mut.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
+            mvStoreMutRef.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
         if chunk_cache_config.is_some() {
-            this_mut.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
+            mvStoreMutRef.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
         }
 
-        pg_split_size = data_utils::get_config_int_param(config, "pageSplitSize", pg_split_size);
-        if this_mut.page_cache.is_some() {
-            let max_item_size = this_mut.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
-            if pg_split_size > max_item_size {
-                pg_split_size = max_item_size;
+        pgSplitSize = data_utils::get_config_int_param(config, "pageSplitSize", pgSplitSize);
+        if mvStoreMutRef.page_cache.is_some() {
+            let max_item_size = mvStoreMutRef.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
+            if pgSplitSize > max_item_size {
+                pgSplitSize = max_item_size;
             }
         }
-        this_mut.pg_split_size = pg_split_size;
-        this_mut.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
+        mvStoreMutRef.pg_split_size = pgSplitSize;
+        mvStoreMutRef.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        this_mut.layout = MVMap::new(mv_store_ref.clone(),
-                                     0,
-                                     string_data_type::INSTANCE.clone(),
-                                     string_data_type::INSTANCE.clone())?;
+        let a = mvStoreMutRef;
+        mvStoreMutRef.layout = MVMap::new(Arc::downgrade(mvStoreSharedPtr.as_ref().unwrap()),
+                                          0,
+                                          string_data_type::INSTANCE.clone(),
+                                          string_data_type::INSTANCE.clone())?;
 
-        if this_mut.file_store.is_some() {
-            this_mut.retention_time = h2_rust_cell_call!(this_mut.file_store, get_default_retention_time);
+        if mvStoreMutRef.file_store.is_some() {
+            mvStoreMutRef.retention_time = h2_rust_cell_call!(mvStoreMutRef.file_store, get_default_retention_time);
 
             // 19 KB memory is about 1 KB storage
             let mut kb = Integer::max(1, Integer::min(19, utils::scale_for_available_memory(64))) * 1024;
             kb = data_utils::get_config_int_param(config, "autoCommitBufferSize", kb);
-            this_mut.auto_commit_memory = kb * 1024;
+            mvStoreMutRef.auto_commit_memory = kb * 1024;
 
-            this_mut.auto_compact_fill_rate = data_utils::get_config_int_param(config, "autoCompactFillRate", 90);
+            mvStoreMutRef.auto_compact_fill_rate = data_utils::get_config_int_param(config, "autoCompactFillRate", 90);
             let encryption_key = config.remove("encryptionKey");
 
             // there is no need to lock store here, since it is not opened (or even created) yet,
             // just to make some assertions happy, when they ensure single-threaded access
-            let store_lock_guard = this.store_lock.lock();
+            let store_lock_guard = mvStoreRef.store_lock.lock();
 
             {
-                let save_chunk_guard = this.save_chunk_lock.lock();
+                let save_chunk_guard = mvStoreRef.save_chunk_lock.lock();
 
                 if file_store_shall_be_open {
                     let read_only = config.contains_key("readOnly");
 
                     let file_name = file_name.unwrap();
                     let encryption_key = h2_rust_utils::cast::<Vec<Byte>>(encryption_key);
-                    h2_rust_cell_mut_call!(this_mut.file_store, open, &file_name, read_only, encryption_key)?;
+                    h2_rust_cell_mut_call!(mvStoreMutRef.file_store, open, &file_name, read_only, encryption_key)?;
                 }
 
-                if h2_rust_cell_call!(this_mut.file_store, size) == 0 {
-                    this_mut.creation_time = h2_rust_utils::get_timestamp();
+                if h2_rust_cell_call!(mvStoreMutRef.file_store, size) == 0 {
+                    mvStoreMutRef.creation_time = h2_rust_utils::get_timestamp();
 
-                    this_mut.store_header.insert(HDR_H.to_string(), Box::new(2));
-                    this_mut.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));
-                    this_mut.store_header.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
-                    this_mut.store_header.insert(HDR_CREATED.to_string(), Box::new(this_mut.creation_time));
+                    mvStoreMutRef.store_header.insert(HDR_H.to_string(), Box::new(2));
+                    mvStoreMutRef.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));
+                    mvStoreMutRef.store_header.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
+                    mvStoreMutRef.store_header.insert(HDR_CREATED.to_string(), Box::new(mvStoreMutRef.creation_time));
 
-                    this_mut.set_last_chunk(None);
+                    mvStoreMutRef.set_last_chunk(None);
                 }
             }
         }
@@ -229,7 +242,7 @@ impl MVStore {
         }
     }
 
-    pub fn read_page(&mut self, mv_map: MVMapRef, position: Long) -> Result<PageTraitRef> {
+    pub fn read_page(&mut self, mv_map: MVMapSharedPtr, position: Long) -> Result<PageTraitRef> {
         if !data_utils::is_page_saved(position) { // position不能是0
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
@@ -250,11 +263,32 @@ impl MVStore {
         }
     }
 
-    fn get_chunk(&self, position: Long) -> ChunkRef {
+    fn get_chunk(&self, position: Long) -> Result<ChunkRef> {
         let chunk_id = data_utils::get_page_chunk_id(position);
 
-        let chunk = self.chunk_id_chunk.get(chunkId);
+        let pair = self.chunk_id_chunk.get(&chunk_id);
+
+        if pair.is_none() || pair.as_ref().unwrap().value().is_none() {
+            self.check_open()?;
+            let s = get_ref!(self.layout).get(H2RustType::String(chunk::get_meta_key(chunk_id)));
+        } else {
+            //Ok(pair.unwrap().value().clone());
+        };
+
         todo!()
+    }
+
+    fn check_open(&self) -> Result<()> {
+        if !self.is_open_or_stopping() {
+            let error_code = store::data_utils_error_code_2_error_code(data_utils::ERROR_CLOSED);
+            throw!(DbError::get(error_code,vec![]));
+        }
+
+        Ok(())
+    }
+
+    fn is_open_or_stopping(&self) -> bool {
+        self.state.load(Ordering::Acquire) <= STATE_STOPPING
     }
 }
 

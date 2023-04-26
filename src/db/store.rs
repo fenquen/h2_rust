@@ -4,11 +4,12 @@ use std::sync::Arc;
 use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
 use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
-use crate::h2_rust_common::{Nullable, VecRef};
+use crate::api::error_code;
+use crate::h2_rust_common::{Integer, Nullable, VecRef};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::{MVStoreBuilder, MVStoreRef};
-use crate::mvstore::mv_store_tool;
+use crate::mvstore::{data_utils, mv_store_tool};
 use crate::store::fs::file_utils;
 
 #[derive(Default)]
@@ -19,6 +20,7 @@ pub struct Store {
 }
 
 pub type StoreRef = Option<Arc<H2RustCell<Store>>>;
+
 
 impl Store {
     pub fn new(database_ref: DatabaseRef, encryption_key: VecRef<u8>) -> Result<StoreRef> {
@@ -82,5 +84,16 @@ impl Store {
         this.mv_store = mv_store_builder.open()?;
 
         Ok(())
+    }
+}
+
+pub fn data_utils_error_code_2_error_code(data_utils_error_code: Integer) -> Integer {
+    match data_utils_error_code {
+        data_utils::ERROR_CLOSED => error_code::DATABASE_IS_CLOSED,
+        data_utils::ERROR_UNSUPPORTED_FORMAT => error_code::FILE_VERSION_ERROR_1,
+        data_utils::ERROR_FILE_CORRUPT => error_code::FILE_CORRUPTED_1,
+        data_utils::ERROR_FILE_LOCKED => error_code::DATABASE_ALREADY_OPEN_1,
+        data_utils::ERROR_READING_FAILED | data_utils::ERROR_WRITING_FAILED => error_code::IO_EXCEPTION_1,
+        _ => error_code::GENERAL_ERROR_1,
     }
 }

@@ -777,3 +777,42 @@ fn test_cast() {
     let a = Car::TOYOTA(Toyota {});
     a.run();
 }
+
+#[test]
+fn test_int_hex() {
+    let a = format!("{:x}", 27);
+    println!("{}", a);
+}
+
+#[test]
+fn test_read_ptr() {
+    struct Car(u8);
+    let x = Car(9);
+    let y = &x as *const Car;
+    println!("{}", y as usize);
+
+    let y0 = unsafe { ptr::read(y) };
+
+    println!("{}", x.0);
+    println!("{}", &y0 as *const Car as usize)
+}
+
+#[test]
+fn test_ref_cell_replace() {
+    struct A(Integer);
+    impl Drop for A {
+        fn drop(&mut self) {
+            println!("{}", "drop A")
+        }
+    }
+
+    let c = H2RustCell::new(A(1));
+    println!("{}", c.get_addr());
+    *c.get_ref_mut() = A(2); // 容器的内容整个替换了会使得老的drop
+    (*c.get_ref_mut()).0 = 21;
+    println!("{}", c.get_addr()); // 地址不变
+
+    println!("{}", "00000000000000");
+
+    println!("{}", c.get_ref().0);
+}

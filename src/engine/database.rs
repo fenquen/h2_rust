@@ -50,69 +50,69 @@ pub type DatabaseRef = Option<Arc<H2RustCell<Database>>>;
 
 impl Database {
     pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<DatabaseRef> {
-        let this = build_h2_rust_cell!(Default::default());
-        Self::init(this.clone(), connection_info, cipher)?;
+        let database_ref = build_h2_rust_cell!(Default::default());
+        Self::init(database_ref.clone(), connection_info, cipher)?;
 
-        Ok(this)
+        Ok(database_ref)
     }
 
     fn init(database_ref: DatabaseRef,
-            connection_info: &mut ConnectionInfo,
+            connectionInfoMutRef: &mut ConnectionInfo,
             cipher: &String) -> Result<()> {
-        let this = get_ref_mut!(database_ref);
+        let databaseMutRef = get_ref_mut!(database_ref);
 
-        this.db_settings = connection_info.get_db_settings()?;
-        this.persistent = connection_info.persistent;
+        databaseMutRef.db_settings = connectionInfoMutRef.get_db_settings()?;
+        databaseMutRef.persistent = connectionInfoMutRef.persistent;
 
-        this.file_password_hash = connection_info.file_password_hash.clone();
-        this.database_path = connection_info.get_database_path()?;
-        this.max_length_inplace_lob = constant::DEFAULT_MAX_LENGTH_INPLACE_LOB;
-        this.cipher = cipher.clone();
-        this.auto_server_mode = connection_info.get_property_bool("AUTO_SERVER", false)?;
-        this.auto_server_port = connection_info.get_property_int("AUTO_SERVER_PORT", 0)?;
-        this.page_size = connection_info.get_property_int("PAGE_SIZE", constant::DEFAULT_PAGE_SIZE)?;
+        databaseMutRef.file_password_hash = connectionInfoMutRef.file_password_hash.clone();
+        databaseMutRef.database_path = connectionInfoMutRef.get_database_path()?;
+        databaseMutRef.max_length_inplace_lob = constant::DEFAULT_MAX_LENGTH_INPLACE_LOB;
+        databaseMutRef.cipher = cipher.clone();
+        databaseMutRef.auto_server_mode = connectionInfoMutRef.get_property_bool("AUTO_SERVER", false)?;
+        databaseMutRef.auto_server_port = connectionInfoMutRef.get_property_int("AUTO_SERVER_PORT", 0)?;
+        databaseMutRef.page_size = connectionInfoMutRef.get_property_int("PAGE_SIZE", constant::DEFAULT_PAGE_SIZE)?;
 
         // database.database_short_name = Self::parse_database_short_name(this.clone());
-        this.database_short_name = this.parse_database_short_name();
+        databaseMutRef.database_short_name = databaseMutRef.parse_database_short_name();
 
-        if !this.cipher.is_empty() && this.page_size % file_encrypt::BLOCK_SIZE != 0 {
-            throw!( DbError::get_unsupported_exception(&format!("CIPHER && PAGE_SIZE={}",  this.page_size)));
+        if !databaseMutRef.cipher.is_empty() && databaseMutRef.page_size % file_encrypt::BLOCK_SIZE != 0 {
+            throw!( DbError::get_unsupported_exception(&format!("CIPHER && PAGE_SIZE={}",  databaseMutRef.page_size)));
         }
 
-        let access_mode_data = string_utils::to_lower_english(&connection_info.get_property_string("ACCESS_MODE_DATA", "rw"));
+        let access_mode_data = string_utils::to_lower_english(&connectionInfoMutRef.get_property_string("ACCESS_MODE_DATA", "rw"));
         if "r".eq(&access_mode_data) {
-            this.read_only = true;
+            databaseMutRef.read_only = true;
         }
 
-        let lock_method_name = connection_info.get_property_string("FILE_LOCK", h2_rust_constant::EMPTY_STR);
-        this.file_lock_method =
+        let lock_method_name = connectionInfoMutRef.get_property_string("FILE_LOCK", h2_rust_constant::EMPTY_STR);
+        databaseMutRef.file_lock_method =
             if !lock_method_name.is_empty() {
                 file_lock::get_file_lock_method(&lock_method_name)?
             } else {
-                if this.auto_server_mode {
+                if databaseMutRef.auto_server_mode {
                     file_lock_method::FILE
                 } else {
                     file_lock_method::FS
                 }
             };
 
-        this.database_url = connection_info.url.clone();
+        databaseMutRef.database_url = connectionInfoMutRef.url.clone();
 
-        this.mode = Mode::get_regular();
-        let s = connection_info.remove_property_str("MODE", h2_rust_constant::EMPTY_STR);
+        databaseMutRef.mode = Mode::get_regular();
+        let s = connectionInfoMutRef.remove_property_str("MODE", h2_rust_constant::EMPTY_STR);
         if !s.is_empty() {
-            this.mode = Mode::get_instance(&s);
-            if this.mode.is_none() {
+            databaseMutRef.mode = Mode::get_instance(&s);
+            if databaseMutRef.mode.is_none() {
                 throw!(DbError::get(error_code::UNKNOWN_MODE_1, vec![&s]));
             }
         }
 
-        let s = connection_info.remove_property_str("DEFAULT_NULL_ORDERING", h2_rust_constant::EMPTY_STR);
+        let s = connectionInfoMutRef.remove_property_str("DEFAULT_NULL_ORDERING", h2_rust_constant::EMPTY_STR);
         if !s.is_empty() {
             let default_null_ordering = DefaultNullOrdering::value_of(&string_utils::to_upper_english(&s));
             match default_null_ordering {
                 Some(d) => {
-                    this.default_null_ordering = Some(d);
+                    databaseMutRef.default_null_ordering = Some(d);
                 }
                 None => {
                     throw!(DbError::get_invalid_value_exception("DEFAULT_NULL_ORDERING", &s));
@@ -120,30 +120,30 @@ impl Database {
             }
         }
 
-        let allow_builtin_alias_override = connection_info.get_property_bool("BUILTIN_ALIAS_OVERRIDE", false)?;
+        let allow_builtin_alias_override = connectionInfoMutRef.get_property_bool("BUILTIN_ALIAS_OVERRIDE", false)?;
 
-        let close_at_vm_shutdown = this.db_settings.db_close_on_exit;
-        if this.auto_server_mode && !close_at_vm_shutdown {
+        let close_at_vm_shutdown = databaseMutRef.db_settings.db_close_on_exit;
+        if databaseMutRef.auto_server_mode && !close_at_vm_shutdown {
             throw!(DbError::get_unsupported_exception("AUTO_SERVER=TRUE && DB_CLOSE_ON_EXIT=FALSE"));
         }
 
-        this.cache_type = string_utils::to_upper_english(&connection_info.remove_property_str("CACHE_TYPE", constant::CACHE_TYPE_DEFAULT));
-        this.ignore_catalogs = connection_info.get_property_bool("IGNORE_CATALOGS", this.db_settings.ignore_catalogs)?;
-        this.lock_mode = connection_info.get_property_int("LOCK_MODE", constant::DEFAULT_LOCK_MODE)?;
+        databaseMutRef.cache_type = string_utils::to_upper_english(&connectionInfoMutRef.remove_property_str("CACHE_TYPE", constant::CACHE_TYPE_DEFAULT));
+        databaseMutRef.ignore_catalogs = connectionInfoMutRef.get_property_bool("IGNORE_CATALOGS", databaseMutRef.db_settings.ignore_catalogs)?;
+        databaseMutRef.lock_mode = connectionInfoMutRef.get_property_int("LOCK_MODE", constant::DEFAULT_LOCK_MODE)?;
 
         {
-            if this.auto_server_mode &&
-                (this.read_only || !this.persistent || this.file_lock_method == file_lock_method::NO || this.file_lock_method == file_lock_method::FS) {
+            if databaseMutRef.auto_server_mode &&
+                (databaseMutRef.read_only || !databaseMutRef.persistent || databaseMutRef.file_lock_method == file_lock_method::NO || databaseMutRef.file_lock_method == file_lock_method::FS) {
                 throw!(DbError::get_unsupported_exception("AUTO_SERVER=TRUE && (readOnly || inMemory || FILE_LOCK=NO || FILE_LOCK=FS)"));
             }
 
-            if this.persistent {
-                let lock_file_name = this.database_path.clone().add(constant::SUFFIX_LOCK_FILE);
-                if this.read_only {
+            if databaseMutRef.persistent {
+                let lock_file_name = databaseMutRef.database_path.clone().add(constant::SUFFIX_LOCK_FILE);
+                if databaseMutRef.read_only {
                     if file_utils::exist(&lock_file_name) {
                         throw!( DbError::get(error_code::DATABASE_ALREADY_OPEN_1, vec![&format!("Lock file exists: {}" , lock_file_name)]));
                     }
-                } else if this.file_lock_method != file_lock_method::NO && this.file_lock_method != file_lock_method::FS {
+                } else if databaseMutRef.file_lock_method != file_lock_method::NO && databaseMutRef.file_lock_method != file_lock_method::FS {
                     todo!()
                     /*lock = new FileLock(traceSystem, lock_file_name, Constants.LOCK_SLEEP);
                     lock.lock(fileLockMethod);
@@ -153,16 +153,16 @@ impl Database {
                 }
 
                 // Self::delete_old_temp_files(this.clone())?;
-                this.delete_old_temp_files()?;
+                databaseMutRef.delete_old_temp_files()?;
             }
 
-            this.starting = AtomicBool::new(true);
+            databaseMutRef.starting = AtomicBool::new(true);
 
-            if !this.db_settings.mv_store {
+            if !databaseMutRef.db_settings.mv_store {
                 throw!( DbError::get(error_code::GENERAL_ERROR_1,vec!["mv store not enabled"]));
             }
 
-            this.store = Store::new(database_ref.clone(), connection_info.file_encryption_key.clone())?;
+            databaseMutRef.store = Store::new(database_ref.clone(), connectionInfoMutRef.file_encryption_key.clone())?;
         }
 
         Ok(())
