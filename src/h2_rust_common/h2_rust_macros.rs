@@ -49,6 +49,22 @@ macro_rules! enum_str {
             }
         }
     };
+
+    (pub enum $type_name:ident {
+        $($enum_name:ident($value:ty)),*,
+    }) => {
+        pub enum $type_name {
+            $($enum_name($value)),*
+        }
+
+        impl $type_name {
+           pub fn name(&self) -> &'static str {
+                match self {
+                    $($type_name::$enum_name(_) => stringify!($enum_name)),*
+                }
+            }
+        }
+    };
 }
 
 macro_rules! enum_name {

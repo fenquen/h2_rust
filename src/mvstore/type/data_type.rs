@@ -53,16 +53,16 @@ pub trait DataType {
     ///
     /// @param buff the target buffer
     /// @param obj  the value
-    fn write_2(&self, buff: &WriteBuffer, obj: &H2RustType);
+    fn write_2(&self, writerBuffer: &WriteBuffer, obj: &H2RustType);
 
     /// Write a list of objects.
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to write
-    fn write_3(&self, buff: &WriteBuffer, storage: &Vec<H2RustType>, len: Integer) {
+    fn write_3(&self, writeBuffer: &WriteBuffer, storage: &Vec<H2RustType>, len: Integer) {
         for a in 0..len as usize {
-            self.write_2(&buff, &storage[a]);
+            self.write_2(&writeBuffer, &storage[a]);
         }
     }
 
@@ -70,7 +70,7 @@ pub trait DataType {
     ///
     /// @param buff the source buffer
     /// @return the object
-    fn read_1(&self, buff: &ByteBuffer) -> H2RustType;
+    fn read_1(&self, byteBuffer: &ByteBuffer) -> H2RustType;
 
     /// Read a list of objects.
     ///

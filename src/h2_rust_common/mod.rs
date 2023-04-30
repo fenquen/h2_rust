@@ -23,6 +23,7 @@ pub type UInteger = u32;
 pub type Long = i64;
 pub type ULong = u64;
 pub type Byte = i8;
+pub type Void = ();
 
 pub type VecRef<T> = Option<Arc<Vec<T>>>;
 

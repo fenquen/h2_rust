@@ -14,7 +14,6 @@ impl<T> H2RustCell<T> {
 }
 
 impl<T: ?Sized> H2RustCell<T> {
-
     #[inline]
     pub fn get_ref(&self) -> &T {
         unsafe { &*self.data.get() }
@@ -135,12 +134,23 @@ macro_rules! get_ref_mut {
 }
 
 #[macro_export]
-macro_rules! build_h2_rust_cell {
+macro_rules! build_option_arc_h2RustCell {
     ($ident:ident) => {
         Some(Arc::new(H2RustCell::new($ident)))
     };
 
     ($expr:expr) => {
         Some(Arc::new(H2RustCell::new($expr)))
+    }
+}
+
+#[macro_export]
+macro_rules! build_arc_h2RustCell {
+   ($ident:ident) => {
+        Arc::new(H2RustCell::new($ident))
+    };
+
+    ($expr:expr) => {
+        Arc::new(H2RustCell::new($expr))
     }
 }

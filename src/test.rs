@@ -813,6 +813,5 @@ fn test_ref_cell_replace() {
     println!("{}", c.get_addr()); // 地址不变
 
     println!("{}", "00000000000000");
-
     println!("{}", c.get_ref().0);
 }

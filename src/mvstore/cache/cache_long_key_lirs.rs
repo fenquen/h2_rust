@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use usync::lock_api::RawMutex;
 use usync::ReentrantMutex;
-use crate::{build_h2_rust_cell, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_plus_plus, unsigned_right_shift};
+use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_plus_plus, unsigned_right_shift};
 use crate::h2_rust_common::{Integer, Long, MyMutex, Nullable, Optional, ULong};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
@@ -67,7 +67,7 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         let max = self.get_max_item_size();
         let segment_arr = self.segment_arr.as_mut().unwrap();
         for _ in 0..self.segment_count {
-            segment_arr.push(build_h2_rust_cell!(Segment::<V>::new(
+            segment_arr.push(build_option_arc_h2RustCell!(Segment::<V>::new(
                 max,
                 self.stack_move_distance,
                 8,
@@ -433,7 +433,7 @@ pub struct Entry<V> {
 
 impl<V: Default + Clone + Optional> Entry<V> {
     pub fn new_0() -> EntryRef<V> {
-        build_h2_rust_cell!(Entry::default())
+        build_option_arc_h2RustCell!(Entry::default())
     }
 
     pub fn new_3(key: Long, value: V, memory: Integer) -> EntryRef<V> {
@@ -441,7 +441,7 @@ impl<V: Default + Clone + Optional> Entry<V> {
         entry.key = key;
         entry.value = value;
         entry.memory = memory;
-        build_h2_rust_cell!(entry)
+        build_option_arc_h2RustCell!(entry)
     }
 
     pub fn new_1(old: &EntryRef<V>) -> EntryRef<V> {
@@ -451,7 +451,7 @@ impl<V: Default + Clone + Optional> Entry<V> {
         entry.key = old.key;
         entry.value = old.value.clone();
         entry.memory = old.memory;
-        build_h2_rust_cell!(entry)
+        build_option_arc_h2RustCell!(entry)
     }
 
     /// whether this entry is hot. Cold entries are in one of the two queues.

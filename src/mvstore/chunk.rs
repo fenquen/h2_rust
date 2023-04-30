@@ -1,7 +1,10 @@
+use anyhow::Result;
+use std::collections::HashMap;
 use std::ops::Add;
 use std::sync::Arc;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::{h2_rust_constant, Integer, Long};
+use crate::mvstore::data_utils;
 
 /// The maximum chunk id.
 pub const MAX_ID: Integer = (1 << 26) - 1;
@@ -33,7 +36,7 @@ const ATTR_TOC: &str = "toc";
 const ATTR_OCCUPANCY: &str = "occupancy";
 const ATTR_FLETCHER: &str = "fletcher";
 
-pub type ChunkRef = Option<Arc<H2RustCell<Chunk>>>;
+pub type ChunkSharedPtr = Option<Arc<H2RustCell<Chunk>>>;
 
 pub struct Chunk {
     pub id: Integer,
@@ -43,10 +46,22 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn show(&mut self) {}
+    pub fn new(s: &String) -> Result<ChunkSharedPtr> {
+        Self::new2(data_utils::parseMap(s)?, true);
+        todo!()
+    }
+
+    fn new2(map: HashMap<String, String>, full: bool) -> ChunkSharedPtr {
+        todo!()
+    }
 }
 
 pub fn get_meta_key(chunk_id: Integer) -> String {
     let chunk_id_hex_string = format!("{:x}", chunk_id);
     ATTR_CHUNK.to_string().add(h2_rust_constant::DOT).add(&chunk_id_hex_string)
+}
+
+/// Build a block from the given string.
+pub fn fromString(s: &String) -> Result<ChunkSharedPtr> {
+    Chunk::new(s)
 }

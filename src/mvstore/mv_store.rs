@@ -14,16 +14,24 @@ use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyL
 use crate::mvstore::{chunk, data_utils};
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapSharedPtr};
-use crate::mvstore::page::{Page, PageTraitRef};
+use crate::mvstore::page::{Page, PageTraitSharedPtr};
 use crate::mvstore::r#type::string_data_type;
-use crate::{h2_rust_cell_call, atomic_ref_cell, atomic_ref_cell_mut, h2_rust_cell_mut_call, get_ref_mut, build_h2_rust_cell, get_ref, throw};
+use crate::{h2_rust_cell_call,
+            atomic_ref_cell,
+            atomic_ref_cell_mut,
+            h2_rust_cell_mut_call,
+            get_ref_mut,
+            build_option_arc_h2RustCell,
+            get_ref,
+            throw,
+            build_arc_h2RustCell};
 use crate::api::error_code;
 use crate::db::store;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::message::db_error;
 use crate::message::db_error::DbError;
-use crate::mvstore::chunk::{Chunk, ChunkRef};
+use crate::mvstore::chunk::{Chunk, ChunkSharedPtr};
 use crate::util::utils;
 
 /// The following are attribute names (keys) in store header map
@@ -63,7 +71,7 @@ pub struct MVStore {
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
 
-    page_cache: Option<CacheLongKeyLIRS<PageTraitRef>>,
+    page_cache: Option<CacheLongKeyLIRS<PageTraitSharedPtr>>,
     chunk_cache: Option<CacheLongKeyLIRS<Option<Arc<Vec<Long>>>>>,
 
     pg_split_size: Integer,
@@ -90,8 +98,8 @@ pub struct MVStore {
     creation_time: Long,
 
     store_header: HashMap<String, Box<dyn Any + Send + Sync>>,
-    last_chunk: AtomicCell<ChunkRef>,
-    chunk_id_chunk: DashMap<Integer, ChunkRef>,
+    last_chunk: AtomicCell<ChunkSharedPtr>,
+    chunk_id_chunk: DashMap<Integer, ChunkSharedPtr>,
     last_chunk_id: Integer,
     last_map_id: AtomicI32,
 
@@ -100,7 +108,7 @@ pub struct MVStore {
 
 impl MVStore {
     pub fn new(config: &mut HashMap<String, Box<dyn Any>>) -> Result<MVStoreRef> {
-        let mv_store_ref = build_h2_rust_cell!(MVStore::default());
+        let mv_store_ref = build_option_arc_h2RustCell!(MVStore::default());
         Self::init(mv_store_ref.clone(), config)?;
 
         Ok(mv_store_ref)
@@ -158,7 +166,6 @@ impl MVStore {
         mvStoreMutRef.keys_per_page = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        let a = mvStoreMutRef;
         mvStoreMutRef.layout = MVMap::new(Arc::downgrade(mvStoreSharedPtr.as_ref().unwrap()),
                                           0,
                                           string_data_type::INSTANCE.clone(),
@@ -210,7 +217,7 @@ impl MVStore {
         self.current_version.load(Ordering::Acquire)
     }
 
-    fn set_last_chunk(&mut self, last_chunk: ChunkRef) {
+    fn set_last_chunk(&mut self, last_chunk: ChunkSharedPtr) {
         self.last_chunk.store(last_chunk.clone());
         self.chunk_id_chunk.clear();
         self.last_chunk_id = 0;
@@ -242,7 +249,7 @@ impl MVStore {
         }
     }
 
-    pub fn read_page(&mut self, mv_map: MVMapSharedPtr, position: Long) -> Result<PageTraitRef> {
+    pub fn read_page(&mut self, mv_map: MVMapSharedPtr, position: Long) -> Result<PageTraitSharedPtr> {
         if !data_utils::is_page_saved(position) { // position不能是0
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
@@ -255,7 +262,7 @@ impl MVStore {
         todo!()
     }
 
-    fn read_page_from_cache(&mut self, position: Long) -> PageTraitRef {
+    fn read_page_from_cache(&mut self, position: Long) -> PageTraitSharedPtr {
         if self.page_cache.is_none() {
             None
         } else {
@@ -263,14 +270,21 @@ impl MVStore {
         }
     }
 
-    fn get_chunk(&self, position: Long) -> Result<ChunkRef> {
+    fn get_chunk(&self, position: Long) -> Result<ChunkSharedPtr> {
         let chunk_id = data_utils::get_page_chunk_id(position);
 
         let pair = self.chunk_id_chunk.get(&chunk_id);
 
         if pair.is_none() || pair.as_ref().unwrap().value().is_none() {
             self.check_open()?;
-            let s = get_ref!(self.layout).get(H2RustType::String(chunk::get_meta_key(chunk_id)));
+
+            let s = get_ref!(self.layout).get(&H2RustType::String(build_arc_h2RustCell!(chunk::get_meta_key(chunk_id))));
+            if s.isNull() {
+                let error_code = store::data_utils_error_code_2_error_code(data_utils::ERROR_CHUNK_NOT_FOUND);
+                throw!(DbError::get(error_code,vec![&format!("Chunk {} not found",chunk_id)]));
+            }
+
+           let chunk = chunk::fromString(s.castAsStringRef())?;
         } else {
             //Ok(pair.unwrap().value().clone());
         };

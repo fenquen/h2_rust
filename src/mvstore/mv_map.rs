@@ -4,14 +4,14 @@ use anyhow::Result;
 use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::{AtomicI64, AtomicPtr};
 use usync::RwLock;
-use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
+use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut};
 use crate::h2_rust_common::{Integer, Long, Nullable};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::{MVStore, MVStoreRef, MVStoreWeakPtr};
 use crate::mvstore::page;
-use crate::mvstore::page::{Page, PageTrait, PageTraitRef};
+use crate::mvstore::page::{Page, PageTrait, PageTraitSharedPtr};
 use crate::mvstore::r#type::data_type::DataType;
 use crate::mvstore::root_reference::{RootReference, RootReferenceRef};
 
@@ -65,7 +65,7 @@ impl MVMap where {
         Ok(mv_map_ref.clone())
     }
 
-    fn new1(mv_store_ref: MVStoreWeakPtr,
+    fn new1(mvStoreWeakPtr: MVStoreWeakPtr,
             key_type: Arc<dyn DataType>,
             value_type: Arc<dyn DataType>,
             id: Integer,
@@ -75,7 +75,7 @@ impl MVMap where {
             single_writer: bool) -> Result<MVMapSharedPtr> {
         let mut mv_map = MVMap::default();
 
-        mv_map.mv_store = mv_store_ref;
+        mv_map.mv_store = mvStoreWeakPtr;
         mv_map.id = id;
         mv_map.create_version = create_version;
         mv_map.key_type = Some(key_type);
@@ -97,10 +97,10 @@ impl MVMap where {
             mv_map.avg_val_size = Some(AtomicI64::new(0));
         }
 
-        Ok(build_h2_rust_cell!(mv_map))
+        Ok(build_option_arc_h2RustCell!(mv_map))
     }
 
-    fn create_empty_leaf(&self, this: MVMapSharedPtr) -> PageTraitRef {
+    fn create_empty_leaf(&self, this: MVMapSharedPtr) -> PageTraitSharedPtr {
         Page::create_empty_leaf(this)
     }
 
@@ -108,7 +108,7 @@ impl MVMap where {
         return self.mv_store.upgrade().is_some() && !self.is_volatile;
     }
 
-    fn set_initial_root(&mut self, root_page: PageTraitRef, version: Long) {
+    fn set_initial_root(&mut self, root_page: PageTraitSharedPtr, version: Long) {
         self.set_root_reference(RootReference::new(root_page, version));
     }
 
@@ -119,10 +119,10 @@ impl MVMap where {
 
     /// set the position of the root page.
     pub fn set_root_pos(&self, root_pos: Long, version: Long, this: MVMapSharedPtr) {
-        let root: PageTraitRef = self.read_or_create_root_page(root_pos, this);
+        let root: PageTraitSharedPtr = self.read_or_create_root_page(root_pos, this);
     }
 
-    fn read_or_create_root_page(&self, root_pos: Long, this: MVMapSharedPtr) -> PageTraitRef {
+    fn read_or_create_root_page(&self, root_pos: Long, this: MVMapSharedPtr) -> PageTraitSharedPtr {
         if root_pos == 0 {
             self.create_empty_leaf(this)
         } else {
@@ -130,19 +130,19 @@ impl MVMap where {
         }
     }
 
-    fn read_page(&self, this: MVMapSharedPtr, position: Long) -> Result<PageTraitRef> {
+    pub fn read_page(&self, this: MVMapSharedPtr, position: Long) -> Result<PageTraitSharedPtr> {
         self.mv_store.upgrade().unwrap().get_ref_mut().read_page(this, position)
     }
 
-    pub fn get(&self, key: H2RustType) -> H2RustType {
+    pub fn get(&self, key: &H2RustType) -> H2RustType {
         self.get2(self.get_root_page(), key)
     }
 
-    pub fn get2(&self, page_trait_ref: PageTraitRef, key: H2RustType) -> H2RustType {
+    pub fn get2(&self, page_trait_ref: PageTraitSharedPtr, key: &H2RustType) -> H2RustType {
         page::get(page_trait_ref, key)
     }
 
-    pub fn get_root_page(&self) -> PageTraitRef {
+    pub fn get_root_page(&self) -> PageTraitSharedPtr {
         let root_reference_ref = self.flush_and_get_root_reference();
         get_ref!(root_reference_ref).root.clone()
     }

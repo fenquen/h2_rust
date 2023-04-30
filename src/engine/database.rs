@@ -19,7 +19,7 @@ use crate::store::{file_lock, file_lock_method};
 use crate::store::file_lock_method::FileLockMethod;
 use crate::store::fs::encrypt::file_encrypt;
 use crate::store::fs::file_utils;
-use crate::{build_h2_rust_cell, get_ref_mut, throw};
+use crate::{build_option_arc_h2RustCell, get_ref_mut, throw};
 use crate::util::string_utils;
 
 #[derive(Default)]
@@ -50,7 +50,7 @@ pub type DatabaseRef = Option<Arc<H2RustCell<Database>>>;
 
 impl Database {
     pub fn new(connection_info: &mut ConnectionInfo, cipher: &String) -> Result<DatabaseRef> {
-        let database_ref = build_h2_rust_cell!(Default::default());
+        let database_ref = build_option_arc_h2RustCell!(Default::default());
         Self::init(database_ref.clone(), connection_info, cipher)?;
 
         Ok(database_ref)

@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
-use crate::{build_h2_rust_cell, get_ref, get_ref_mut};
+use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut};
 use crate::api::error_code;
 use crate::h2_rust_common::{Integer, Nullable, VecRef};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
@@ -24,7 +24,7 @@ pub type StoreRef = Option<Arc<H2RustCell<Store>>>;
 
 impl Store {
     pub fn new(database_ref: DatabaseRef, encryption_key: VecRef<u8>) -> Result<StoreRef> {
-        let store_ref = build_h2_rust_cell!(Store::default());
+        let store_ref = build_option_arc_h2RustCell!(Store::default());
         Self::init(store_ref.clone(), database_ref.clone(), encryption_key)?;
         Ok(store_ref)
     }
