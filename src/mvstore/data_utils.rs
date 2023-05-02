@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::Add;
 use crate::api::error_code;
 use crate::h2_rust_common::{h2_rust_constant, h2_rust_utils, Integer, Long, ULong};
@@ -207,4 +208,53 @@ fn parseMapValue(s: &String, mut a: usize, size: usize) -> Result<(String, usize
     }
 
     Ok((result, a))
+}
+
+pub fn readHexIntOrLong<T: 'static + Display, TargetType: Copy + 'static>(map: &HashMap<String, T>,
+                                                                          key: &String,
+                                                                          defaultValue: TargetType) -> Result<TargetType>
+    where Long: Convertable<TargetType> {
+
+    let valueOption = map.get(key);
+    if valueOption.is_none() {
+        return Ok(defaultValue);
+    }
+
+    let value = valueOption.unwrap();
+    let valueDyn = value as &dyn Any;
+
+    match valueDyn.downcast_ref::<TargetType>() {
+        Some(targetTypeRef) => return Ok(*targetTypeRef),
+        _ => {}
+    }
+
+    match valueDyn.downcast_ref::<String>() {
+        Some(string) => {
+            match Long::from_str_radix(string, 16) {
+                Ok(long) => Ok(long.convert()),
+                Err(e) => {
+                    throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("error parsing the value {}", value)]))
+                }
+            }
+        }
+        _ => {
+            throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("error parsing the value {}", value)]))
+        }
+    }
+}
+
+pub trait Convertable<TargetType: Copy> {
+    fn convert(&self) -> TargetType;
+}
+
+impl Convertable<Long> for Long {
+    fn convert(&self) -> Long {
+        *self
+    }
+}
+
+impl Convertable<Integer> for Long {
+    fn convert(&self) -> Integer {
+        *self as Integer
+    }
 }
