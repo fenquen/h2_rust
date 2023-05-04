@@ -211,10 +211,9 @@ fn parseMapValue(s: &String, mut a: usize, size: usize) -> Result<(String, usize
 }
 
 pub fn readHexIntOrLong<T: 'static + Display, TargetType: Copy + 'static>(map: &HashMap<String, T>,
-                                                                          key: &String,
+                                                                          key: &str,
                                                                           defaultValue: TargetType) -> Result<TargetType>
     where Long: Convertable<TargetType> {
-
     let valueOption = map.get(key);
     if valueOption.is_none() {
         return Ok(defaultValue);
@@ -256,5 +255,28 @@ impl Convertable<Long> for Long {
 impl Convertable<Integer> for Long {
     fn convert(&self) -> Integer {
         *self as Integer
+    }
+}
+
+/// Get the offset from the position <br>
+/// @param tocElement packed table of content element
+pub fn getPageOffset(tocElement: Long) -> Integer {
+    (tocElement >> 6) as Integer
+}
+
+/// get the maximum length for the given page position.
+pub fn getPageMaxLength(position: Long) -> Integer {
+    let code = (int)((position >> 1) & 31);
+    decodePageLength(code)
+}
+
+
+/// Get the maximum length for the given code,For the code 31, PAGE_LARGE is returned <br>
+/// return the maximum length
+pub fn decodePageLength(encodedPageLength: Integer) -> Integer {
+    if encodedPageLength == 31 {
+        PAGE_LARGE
+    } else {
+        (2 + (encodedPageLength & 1)) << ((encodedPageLength >> 1) + 4)
     }
 }

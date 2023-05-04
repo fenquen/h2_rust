@@ -16,6 +16,7 @@ pub mod h2_rust_constant;
 pub mod file_lock;
 pub mod h2_rust_cell;
 pub mod h2_rust_type;
+pub mod byte_buffer;
 
 pub type Properties = HashMap<String, String>;
 pub type Integer = i32;
@@ -23,6 +24,7 @@ pub type UInteger = u32;
 pub type Long = i64;
 pub type ULong = u64;
 pub type Byte = i8;
+pub type UnsignedByte = u8;
 pub type Void = ();
 
 pub type VecRef<T> = Option<Arc<Vec<T>>>;

@@ -120,5 +120,15 @@ impl FileStore {
     pub fn size(&self) -> Long {
         self.file_size
     }
+
+    pub fn readFully(&self,position: Long, len: Integer) {
+
+
+        let dest = ByteBuffer.allocate(len);
+        DataUtils.readFully(fileChannel, position, dest);
+        readCount.incrementAndGet();
+        readByteCount.addAndGet(len);
+        return dest;
+    }
 }
 

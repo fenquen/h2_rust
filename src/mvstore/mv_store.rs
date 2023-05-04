@@ -46,7 +46,7 @@ const HDR_VERSION: &str = "version";
 const HDR_CLEAN: &str = "clean";
 const HDR_FLETCHER: &str = "fletcher";
 
-const BLOCK_SIZE: Integer = 4 * 1024;
+pub const BLOCK_SIZE: Integer = 4 * 1024;
 const FORMAT_WRITE_MIN: Integer = 2;
 const FORMAT_WRITE_MAX: Integer = 2;
 const FORMAT_READ_MIN: Integer = 2;
@@ -99,7 +99,7 @@ pub struct MVStore {
 
     store_header: HashMap<String, Box<dyn Any + Send + Sync>>,
     last_chunk: AtomicCell<ChunkSharedPtr>,
-    chunk_id_chunk: DashMap<Integer, ChunkSharedPtr>,
+    chunkId_chunk: DashMap<Integer, ChunkSharedPtr>,
     last_chunk_id: Integer,
     last_map_id: AtomicI32,
 
@@ -219,7 +219,7 @@ impl MVStore {
 
     fn set_last_chunk(&mut self, last_chunk: ChunkSharedPtr) {
         self.last_chunk.store(last_chunk.clone());
-        self.chunk_id_chunk.clear();
+        self.chunkId_chunk.clear();
         self.last_chunk_id = 0;
         self.current_version.store(self.last_chunk_version(), Ordering::Release);
 
@@ -229,9 +229,9 @@ impl MVStore {
         if last_chunk.is_some() { // there is a valid chunk
             self.last_chunk_id = get_ref!(last_chunk).id;
             self.current_version.store(get_ref!(last_chunk).version, Ordering::Release);
-            layout_root_pos = get_ref!(last_chunk).layout_root_pos;
+            layout_root_pos = get_ref!(last_chunk).layoutRootPos;
             map_id = get_ref!(last_chunk).map_id;
-            self.chunk_id_chunk.insert(get_ref!(last_chunk).id, last_chunk);
+            self.chunkId_chunk.insert(get_ref!(last_chunk).id, last_chunk);
         }
 
         self.last_map_id.store(map_id, Ordering::Release);
@@ -256,7 +256,10 @@ impl MVStore {
 
         let page_ref = self.read_page_from_cache(position);
         if page_ref.is_none() {
-            let chunk_ref = self.get_chunk(position);
+            let chunkSharedPtr = self.get_chunk(position)?;
+            let pageOffset = data_utils::getPageOffset(position);
+
+            let byteBuffer = get_ref!(chunkSharedPtr).readBufferForPage(self.file_store.clone(), pageOffset, position);
         }
 
         todo!()
@@ -270,10 +273,10 @@ impl MVStore {
         }
     }
 
-    fn get_chunk(&self, position: Long) -> Result<ChunkSharedPtr> {
+    fn get_chunk(&mut self, position: Long) -> Result<ChunkSharedPtr> {
         let chunk_id = data_utils::get_page_chunk_id(position);
 
-        let pair = self.chunk_id_chunk.get(&chunk_id);
+        let pair = self.chunkId_chunk.get(&chunk_id);
 
         if pair.is_none() || pair.as_ref().unwrap().value().is_none() {
             self.check_open()?;
@@ -284,12 +287,16 @@ impl MVStore {
                 throw!(DbError::get(error_code,vec![&format!("Chunk {} not found",chunk_id)]));
             }
 
-           let chunk = chunk::fromString(s.castAsStringRef())?;
-        } else {
-            //Ok(pair.unwrap().value().clone());
-        };
+            let chunk = chunk::fromString(s.castAsStringRef())?;
+            if !get_ref!(chunk).isSaved() {
+                throw!( DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("chunk {} is invalid",chunk_id)]));
+            }
 
-        todo!()
+            self.chunkId_chunk.insert(get_ref!(chunk).id, chunk.clone());
+            Ok(chunk)
+        } else {
+            Ok(pair.unwrap().value().clone())
+        }
     }
 
     fn check_open(&self) -> Result<()> {

@@ -67,6 +67,32 @@ pub fn truncate_string(s: &str, max_length: usize) -> String {
     }
 }
 
+pub fn convertHexString2ByteArr(s: &str) -> Result<Vec<u8>> {
+    let mut len = s.len();
+    if len % 2 != 0 {
+        throw!( DbError::get(error_code::HEX_STRING_ODD_1, vec![s]));
+    }
+
+    len = len / 2;
+    let mut byteVec = Vec::with_capacity(len);
+
+    let mut mask = 0;
+
+    let stringByteArr = s.as_bytes();
+
+    for a in 0..len {
+        let d = HEX_DECODE[stringByteArr[a + a] as usize] << 4 | HEX_DECODE[stringByteArr[a + a + 1] as usize];
+        mask = mask | d;
+        byteVec.insert(a, d as u8);
+    }
+
+    if (mask & !255) != 0 {
+        throw!(DbError::get(error_code::HEX_STRING_WRONG_1, vec![s]));
+    }
+
+    Ok(byteVec)
+}
+
 mod test {
     use crate::h2_rust_common::Integer;
 
