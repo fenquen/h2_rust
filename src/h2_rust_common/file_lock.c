@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 int c_lock(int fd, int is_blocking, int64_t position, int64_t size, int is_shared) {
     if (fd < 0) {
