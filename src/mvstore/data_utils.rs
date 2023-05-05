@@ -266,7 +266,7 @@ pub fn getPageOffset(tocElement: Long) -> Integer {
 
 /// get the maximum length for the given page position.
 pub fn getPageMaxLength(position: Long) -> Integer {
-    let code = (int)((position >> 1) & 31);
+    let code = ((position >> 1) & 31) as Integer;
     decodePageLength(code)
 }
 

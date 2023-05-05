@@ -123,12 +123,13 @@ impl FileStore {
 
     pub fn readFully(&self,position: Long, len: Integer) {
 
+        todo!()
 
-        let dest = ByteBuffer.allocate(len);
+       /* let dest = ByteBuffer.allocate(len);
         DataUtils.readFully(fileChannel, position, dest);
         readCount.incrementAndGet();
         readByteCount.addAndGet(len);
-        return dest;
+        return dest;*/
     }
 }
 

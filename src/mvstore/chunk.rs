@@ -122,14 +122,14 @@ impl Chunk {
         self.block != Long::MAX
     }
 
-    pub fn readBufferForPage(&self, fileStore: FileStoreRef, offset: Integer, position: Long) {
+    pub fn readBufferForPage(&self, fileStore: FileStoreRef, offset: Integer, position: Long) -> Result<()> {
         loop {
             let originalBlock = self.block;
 
-            let mut positionInFile = originalBlock * mv_store::BLOCK_SIZE;
-            let maxPos = positionInFile + self.blockCount * mv_store::BLOCK_SIZE;
+            let mut positionInFile = originalBlock * mv_store::BLOCK_SIZE as Long;
+            let maxPos = positionInFile + (self.blockCount * mv_store::BLOCK_SIZE) as Long;
 
-            positionInFile = positionInFile + offset;
+            positionInFile = positionInFile + offset as Long;
             if positionInFile < 0 {
                 throw!(DbError::get(error_code::FILE_CORRUPTED_1,
                     vec![&format!("negative positionInFile:{}; position:{}", positionInFile, position)]));
