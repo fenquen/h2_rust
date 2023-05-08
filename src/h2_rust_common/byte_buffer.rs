@@ -26,11 +26,14 @@ pub fn wrapSlice(slice: &[u8]) -> ByteBuffer {
 }
 
 pub fn wrapVec(vec: Vec<u8>) -> ByteBuffer {
+    let capacity = vec.capacity();
+    let limit = capacity;
+
     ByteBuffer {
         data: vec,
         position: 0,
-        capacity: vec.capacity(),
-        limit: vec.capacity(),
+        capacity,
+        limit,
     }
 }
 
@@ -75,30 +78,56 @@ impl ByteBuffer {
         self.limit = newLimit;
     }
 
-    pub fn getByte(&mut self) -> u8 {
+    pub fn getI8(&mut self) -> i8 {
         let oldPosition = self.position;
-        self.setPosition(oldPosition + 1);
+        self.advance(1);
+        self.data[oldPosition] as i8
+    }
+
+    pub fn getU8(&mut self) -> u8 {
+        let oldPosition = self.position;
+        self.advance(1);
         self.data[oldPosition]
     }
 
-    pub fn putByte(&mut self, b: u8) {
+    pub fn putU8(&mut self, b: u8) {
         let oldPosition = self.position;
         self.setPosition(self.position + 1);
         self.data[oldPosition] = b
     }
 
     pub fn getU16(&mut self) -> u16 {
-        self.setPosition(self.position + 2);
-        (self.getByte() as u16) << 8 | self.getByte() as u16
+        let oldPosition = self.position;
+        self.advance(2);
+        (self.data[oldPosition] as u16) << 8 | self.data[oldPosition + 1] as u16
     }
 
     pub fn putU16(&mut self, u: u16) {
         let oldPosition = self.position;
 
-        self.setPosition(self.position + 2);
+        self.advance(2);
 
         self.data[oldPosition] = (u >> 8) as u8;
         self.data[oldPosition + 1] = u as u8;
+    }
+
+    pub fn getI16(&mut self) -> i16 {
+        let oldPosition = self.position;
+
+        self.advance(2);
+
+        (self.data[oldPosition] as i16) << 8 | self.data[oldPosition + 1] as i16
+    }
+
+    pub fn getI32(&mut self) -> i32 {
+        let oldPosition = self.position;
+
+        self.advance(4);
+
+        (self.data[oldPosition] as i32) << 24 |
+            (self.data[oldPosition + 1] as i32) << 16 |
+            (self.data[oldPosition + 2] as i32) << 8 |
+            (self.data[oldPosition + 3] as i32) << 24
     }
 
     pub fn putI32(&mut self, a: i32) {
@@ -141,7 +170,7 @@ impl ByteBuffer {
         }
 
         for a in 0..dest.len() {
-            dest[a] = self.getByte();
+            dest[a] = self.getU8();
         }
     }
 
@@ -160,7 +189,7 @@ impl ByteBuffer {
                 return;
             }
 
-            self.putByte(src.getByte())
+            self.putU8(src.getU8())
         }
     }
 
@@ -178,15 +207,23 @@ impl ByteBuffer {
         self.position = 0;
     }
 
+    pub fn rewind(&mut self) {
+        self.position = 0;
+    }
+
     pub fn extract(&self) -> &[u8] {
         return &self.data[self.position..self.limit];
+    }
+
+    pub fn extractMut(&mut self) -> &mut [u8] {
+        return &mut self.data[self.position..self.limit];
     }
 
     pub fn extractWithPosLen(&self, position: usize, len: usize) -> &[u8] {
         return &self.data[position..position + len];
     }
 
-    pub fn skip(&mut self, count: usize) {
+    pub fn advance(&mut self, count: usize) {
         self.setPosition(self.position + count);
     }
 }

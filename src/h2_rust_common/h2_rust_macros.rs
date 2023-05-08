@@ -174,6 +174,13 @@ macro_rules! suffix_plus_plus {
     };
 }
 
+#[macro_export]
+macro_rules! db_error_template {
+    ($errorCode:expr,$template:expr,$($variant:expr),*) => {
+        DbError::get($errorCode, vec![&format!($template, $($variant),*)])
+    };
+}
+
 mod test {
     use std::sync::Arc;
     use atomic_refcell::AtomicRefCell;

@@ -2,11 +2,14 @@ use anyhow::Result;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs::File;
 use std::ops::Add;
+use std::os::unix::fs::FileExt;
 use crate::api::error_code;
 use crate::h2_rust_common::{h2_rust_constant, h2_rust_utils, Integer, Long, ULong};
 use crate::message::db_error::DbError;
 use crate::{suffix_plus_plus, throw, unsigned_right_shift};
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
 
 /// An error occurred while reading from the file.
 pub const ERROR_READING_FAILED: Integer = 1;
@@ -149,7 +152,7 @@ pub fn is_page_saved(position: Long) -> bool {
     (position & !1) != 0
 }
 
-pub fn get_page_chunk_id(position: Long) -> Integer {
+pub fn getPageChunkId(position: Long) -> Integer {
     unsigned_right_shift!(position, 38, Long) as Integer
 }
 
@@ -279,4 +282,86 @@ pub fn decodePageLength(encodedPageLength: Integer) -> Integer {
     } else {
         (2 + (encodedPageLength & 1)) << ((encodedPageLength >> 1) + 4)
     }
+}
+
+pub fn readFully(file: &File, mut position: usize, byteBuffer: &mut ByteBuffer) -> Result<()> {
+    // java中fileChannel.read(byteBuffer)用的也是如下的套路
+    // 也是找了个中间的buffer 然后再让真正的dest去吸取
+    let mut a = Vec::<u8>::with_capacity(byteBuffer.getCapacity());
+    let aa: &mut [u8] = &mut a;
+
+    loop {
+        let len = file.read_at(aa, position as u64)?;
+        byteBuffer.putSlice_(aa, 0, len);
+
+        position += len;
+
+        if !byteBuffer.hasRemaining() {
+            break;
+        }
+    }
+
+    byteBuffer.rewind();
+
+    Ok(())
+}
+
+pub fn writeFully(file: &File, mut position: usize, src: &mut ByteBuffer) -> Result<()> {
+    loop {
+        let slice = src.extract();
+        let len = file.write_at(slice, position as u64)?;
+        position += len;
+        src.advance(len);
+
+        if !src.hasRemaining() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn getPageType(position: Long) -> Integer {
+    (position as Integer) & 1
+}
+
+/// Calculate a check value for the given integer. A check value is mean to
+/// verify the data is consistent with a high probability, but not meant to
+/// protect against media failure or deliberate changes.
+pub fn getCheckValue(x: Integer) -> i16 {
+    ((x >> 16) ^ x) as i16
+}
+
+pub fn readVarInt(byteBuffer: &mut ByteBuffer) -> i32 {
+    let b = byteBuffer.getI8() as i32;
+    if b >= 0 {
+        return b;
+    }
+
+    // a separate function so that this one can be inlined
+    return readVarIntRest(byteBuffer, b);
+}
+
+pub fn readVarIntRest(byteBuffer: &mut ByteBuffer, mut b: i32) -> i32 {
+    let mut x = b & 0x7f;
+    b = byteBuffer.getI8() as i32;
+    if b >= 0 {
+        return x | (b << 7);
+    }
+
+    x |= (b & 0x7f) << 7;
+    b = byteBuffer.getI8() as i32;
+    if b >= 0 {
+        return x | (b << 14);
+    }
+
+    x |= (b & 0x7f) << 14;
+    b = byteBuffer.getI8() as i32;
+    if b >= 0 {
+        return x | b << 21;
+    }
+
+    x |= ((b & 0x7f) << 21) | ((byteBuffer.getI8() as i32) << 28);
+
+    x
 }

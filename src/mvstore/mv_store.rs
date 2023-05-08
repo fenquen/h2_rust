@@ -11,7 +11,7 @@ use dashmap::DashMap;
 use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
 use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
-use crate::mvstore::{chunk, data_utils};
+use crate::mvstore::{chunk, data_utils, page};
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapSharedPtr};
 use crate::mvstore::page::{Page, PageTraitSharedPtr};
@@ -249,17 +249,19 @@ impl MVStore {
         }
     }
 
-    pub fn read_page(&mut self, mv_map: MVMapSharedPtr, position: Long) -> Result<PageTraitSharedPtr> {
+    pub fn read_page(&mut self, mvMap: MVMapSharedPtr, position: Long) -> Result<PageTraitSharedPtr> {
         if !data_utils::is_page_saved(position) { // position不能是0
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
 
-        let page_ref = self.read_page_from_cache(position);
+        let mut page_ref = self.read_page_from_cache(position);
         if page_ref.is_none() {
             let chunkSharedPtr = self.get_chunk(position)?;
             let pageOffset = data_utils::getPageOffset(position);
 
-            let byteBuffer = get_ref!(chunkSharedPtr).readBufferForPage(self.file_store.clone(), pageOffset, position);
+            let mut byteBuffer = get_ref!(chunkSharedPtr).readBufferForPage(self.file_store.clone(), pageOffset, position)?;
+
+            page_ref = page::readFromByteBuffer(&mut byteBuffer, position, mvMap);
         }
 
         todo!()
@@ -274,7 +276,7 @@ impl MVStore {
     }
 
     fn get_chunk(&mut self, position: Long) -> Result<ChunkSharedPtr> {
-        let chunk_id = data_utils::get_page_chunk_id(position);
+        let chunk_id = data_utils::getPageChunkId(position);
 
         let pair = self.chunkId_chunk.get(&chunk_id);
 

@@ -26,6 +26,7 @@ pub type ULong = u64;
 pub type Byte = i8;
 pub type UnsignedByte = u8;
 pub type Void = ();
+pub type Short = i16;
 
 pub type VecRef<T> = Option<Arc<Vec<T>>>;
 

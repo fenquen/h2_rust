@@ -1,15 +1,19 @@
 use std::cell::RefCell;
+use std::fmt::Alignment::Left;
 use anyhow::Result;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use lazy_static::lazy_static;
 use crate::engine::constant;
-use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell};
+use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template};
+use crate::api::error_code;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::h2_rust_type::H2RustType::Null;
-use crate::h2_rust_common::{Integer, Long};
+use crate::h2_rust_common::{Integer, Long, Short};
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
+use crate::message::db_error::DbError;
 use crate::mvstore::data_utils;
 use crate::mvstore::mv_map::MVMapSharedPtr;
 
@@ -68,7 +72,14 @@ pub trait PageTrait {
 
     /// 父类实现
     fn getPosition(&self) -> Long;
+
+    /// 父类实现
+    fn setPosition(&self, position: Long);
+
+    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()>;
 }
+
+pub type PageSharedPtr = Option<Arc<H2RustCell<Page>>>;
 
 #[derive(Default)]
 pub struct Page {
@@ -82,9 +93,19 @@ pub struct Page {
     pub cached_compare: Integer,
 
     pub position: AtomicI64,
+
+    /// 0-based number of the page within containing chunk,默认是-1
+    pub pageNo: Integer,
 }
 
 impl Page {
+    pub fn new() -> PageSharedPtr {
+        let mut page = Page::default();
+        page.pageNo = -1;
+
+        Some(Arc::new(H2RustCell::new(page)))
+    }
+
     pub fn create_empty_leaf(mv_map_ref: MVMapSharedPtr) -> PageTraitSharedPtr {
         let mv_map = get_ref!(mv_map_ref);
 
@@ -105,7 +126,7 @@ impl Page {
                        memory: Integer) -> PageTraitSharedPtr {
         assert!(mv_map_ref.is_some());
 
-        let mut leaf = Leaf::new(build_option_arc_h2RustCell!(Page::default()), mv_map_ref, keys, values);
+        let mut leaf = Leaf::new(mv_map_ref, keys, values);
         leaf.init_memory_account(memory);
         let page_trait_ref = Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait>>;
         Some(page_trait_ref)
@@ -163,7 +184,6 @@ pub fn get(mut pageTraitSharedPtr: PageTraitSharedPtr, key: &H2RustType) -> H2Ru
 }
 
 impl PageTrait for Page {
-    /// 要在trait上
     fn init_memory_account(&mut self, memory_count: Integer) {
         if !h2_rust_cell_call!(self.mv_map, is_persistent) {
             self.memory = IN_MEMORY;
@@ -210,30 +230,76 @@ impl PageTrait for Page {
     fn getPosition(&self) -> Long {
         self.position.load(Ordering::Acquire)
     }
+
+    fn setPosition(&self, position: Long) {
+        self.position.store(position, Ordering::Release);
+    }
+
+    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
+        let chunkId = data_utils::getPageChunkId(self.position.load(Ordering::Acquire));
+        let offset = data_utils::getPageOffset(self.position.load(Ordering::Acquire));
+
+        let start = byteBuffer.getPosition();
+        let pageLength = byteBuffer.getI32(); // does not include optional part (pageNo)
+        let remaining = byteBuffer.getRemaining() + 4;
+        if pageLength as usize > remaining || pageLength < 4 {
+            throw!(DbError::get(error_code::FILE_CORRUPTED_1,
+                         vec![&format!("file corrupted in chunk {}, expected page length 4..{}, got {}", chunkId, remaining, pageLength)]));
+        }
+
+        let check = byteBuffer.getI16();
+        let checkTest = data_utils::getCheckValue(chunkId) as Integer
+            ^ data_utils::getCheckValue(offset) as Integer
+            ^ data_utils::getCheckValue(pageLength) as Integer;
+        if check != checkTest as Short {
+            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected check value {}, got {}", chunkId, checkTest, check));
+        }
+
+        self.pageNo = data_utils::readVarInt(byteBuffer);
+        if self.pageNo < 0 {
+            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, got negative page No {}", chunkId, self.pageNo));
+        }
+
+        Ok(())
+    }
 }
 
 pub type LeafRef = Option<Arc<H2RustCell<Leaf>>>;
 
+#[derive(Default)]
 pub struct Leaf {
     page: PageRef,
     values: Vec<H2RustType>,
 }
 
 impl Leaf {
-    pub fn new(page_ref: PageRef,
-               mv_map_ref: MVMapSharedPtr,
+    pub fn new(mv_map_ref: MVMapSharedPtr,
                keys: Vec<H2RustType>,
                values: Vec<H2RustType>) -> Leaf {
+        let page_ref = Page::new();
+
         {
-            let mut atomic_ref_mut = page_ref.as_ref().unwrap().get_ref_mut();
-            atomic_ref_mut.mv_map = mv_map_ref;
-            atomic_ref_mut.keys = keys;
+            let pageMutRef = get_ref_mut!(page_ref);
+            pageMutRef.mv_map = mv_map_ref;
+            pageMutRef.keys = keys;
         }
 
-        let leaf = Leaf {
+        Leaf {
             page: page_ref,
             values,
-        };
+        }
+    }
+
+    pub fn new1(mvMapSharedPtr: MVMapSharedPtr) -> Leaf {
+        let pageRef = build_option_arc_h2RustCell!(Page::default());
+
+        {
+            let pageMutRef = pageRef.as_ref().unwrap().get_ref_mut();
+            pageMutRef.mv_map = mvMapSharedPtr;
+        }
+
+        let mut leaf = Leaf::default();
+        leaf.page = pageRef;
 
         leaf
     }
@@ -274,8 +340,17 @@ impl PageTrait for Leaf {
     fn getPosition(&self) -> Long {
         get_ref!(self.page).getPosition()
     }
+
+    fn setPosition(&self, position: Long) {
+        get_ref!(self.page).setPosition(position);
+    }
+
+    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
+        get_ref_mut!(self.page).readFromByteBuffer(byteBuffer)
+    }
 }
 
+#[derive(Default)]
 pub struct NonLeaf {
     page: PageRef,
 
@@ -287,6 +362,20 @@ pub struct NonLeaf {
 }
 
 impl NonLeaf {
+    pub fn new1(mvMapSharedPtr: MVMapSharedPtr) -> NonLeaf {
+        let pageRef = Page::new();
+
+        {
+            let pageMutRef = get_ref_mut!(pageRef);
+            pageMutRef.mv_map = mvMapSharedPtr;
+        }
+
+        let mut nonLeaf = NonLeaf::default();
+        nonLeaf.page = pageRef;
+
+        nonLeaf
+    }
+
     fn calculateTotalCount(&self) -> Long {
         let mut totalCount = 0;
         let keyCount = self.get_key_count();
@@ -342,6 +431,15 @@ impl PageTrait for NonLeaf {
     fn getPosition(&self) -> Long {
         get_ref!(self.page).getPosition()
     }
+
+
+    fn setPosition(&self, position: Long) {
+        get_ref!(self.page).setPosition(position);
+    }
+
+    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
+        get_ref_mut!(self.page).readFromByteBuffer(byteBuffer)
+    }
 }
 
 pub type PageReferenceSharedPtr = Option<Arc<H2RustCell<PageReference>>>;
@@ -370,4 +468,22 @@ impl PageReference {
             count
         })
     }
+}
+
+pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: MVMapSharedPtr) -> PageTraitSharedPtr {
+    let isLeaf = (data_utils::getPageType(position) & 1) == data_utils::PAGE_TYPE_LEAF;
+
+    let pageTrait = if isLeaf {
+        let leaf = Leaf::new1(mvMap);
+        Some(Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait>>)
+    } else {
+        let nonLeaf = NonLeaf::new1(mvMap);
+        Some(Arc::new(H2RustCell::new(nonLeaf)) as Arc<H2RustCell<dyn PageTrait>>)
+    };
+
+    get_ref!(pageTrait).setPosition(position);
+
+    get_ref_mut!(pageTrait).readFromByteBuffer(byteBuffer);
+
+    pageTrait
 }

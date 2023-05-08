@@ -2,13 +2,15 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::ops::Add;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use bit_set::BitSet;
 use crate::api::error_code;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
-use crate::h2_rust_common::{Byte, h2_rust_constant, Integer, Long, UInteger};
+use crate::h2_rust_common::{Byte, byte_buffer, h2_rust_constant, Integer, Long, UInteger};
 use crate::message::db_error::DbError;
-use crate::mvstore::{data_utils, mv_store};
-use crate::{build_option_arc_h2RustCell, get_ref, throw};
+use crate::mvstore::{chunk, data_utils, mv_store};
+use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut, throw};
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::util::string_utils;
 
@@ -51,7 +53,7 @@ pub struct Chunk {
     pub version: Long,
     pub layoutRootPos: Long,
     pub map_id: Integer,
-    pub block: Long,
+    pub block: AtomicI64,
     /// 占有了多少个block
     pub blockCount: Integer,
     pub pageCount: Integer,
@@ -83,7 +85,7 @@ impl Chunk {
 
         chunk.id = chunk_id;
 
-        chunk.block = data_utils::readHexIntOrLong(&map, ATTR_BLOCK, 0)?;
+        chunk.block.store(data_utils::readHexIntOrLong(&map, ATTR_BLOCK, 0)?, Ordering::Release);
         chunk.version = data_utils::readHexIntOrLong(&map, ATTR_VERSION, chunk_id as Long)?;
 
         if full {
@@ -119,12 +121,12 @@ impl Chunk {
 
 impl Chunk {
     pub fn isSaved(&self) -> bool {
-        self.block != Long::MAX
+        self.block.load(Ordering::Acquire) != Long::MAX
     }
 
-    pub fn readBufferForPage(&self, fileStore: FileStoreRef, offset: Integer, position: Long) -> Result<()> {
+    pub fn readBufferForPage(&self, fileStore: FileStoreRef, offset: Integer, position: Long) -> Result<ByteBuffer> {
         loop {
-            let originalBlock = self.block;
+            let originalBlock = self.block.load(Ordering::Acquire);
 
             let mut positionInFile = originalBlock * mv_store::BLOCK_SIZE as Long;
             let maxPos = positionInFile + (self.blockCount * mv_store::BLOCK_SIZE) as Long;
@@ -135,12 +137,26 @@ impl Chunk {
                     vec![&format!("negative positionInFile:{}; position:{}", positionInFile, position)]));
             }
 
-            let length = data_utils::getPageMaxLength(position);
+            let mut length = data_utils::getPageMaxLength(position);
             if length == data_utils::PAGE_LARGE {
-                get_ref!(fileStore).readFully(positionInFile, 128);
+                let mut byteBuffer = get_ref_mut!(fileStore).readFully(positionInFile as usize, 128)?;
+                length = byteBuffer.getI32();
+
+                length += 4;
+            }
+
+            length = Long::min(maxPos - positionInFile, length as Long) as Integer;
+            if length < 0 {
+                throw!(DbError::get(error_code::FILE_CORRUPTED_1,
+                                    vec![&format!("illegal page length {} reading at {}; max pos {} ", length, positionInFile, maxPos)]));
+            }
+
+            let byteBuffer = get_ref_mut!(fileStore).readFully(positionInFile as usize, length as usize)?;
+
+            if originalBlock == self.block.load(Ordering::Acquire) {
+                return Ok(byteBuffer);
             }
         }
-        todo!()
     }
 }
 

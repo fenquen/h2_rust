@@ -212,12 +212,12 @@ impl<V: Default + Clone + Optional> Segment<V> {
         ref_mut.stack_next = self.stack.clone();
 
         self.queue = Entry::new_0();
-        let mut ref_mut = get_ref_mut!(self.queue);
+        let ref_mut = get_ref_mut!(self.queue);
         ref_mut.queue_prev = self.queue.clone();
         ref_mut.queue_next = self.queue.clone();
 
         self.queue2 = Entry::new_0();
-        let mut ref_mut = get_ref_mut!(self.queue2);
+        let ref_mut = get_ref_mut!(self.queue2);
         ref_mut.queue_prev = self.queue2.clone();
         ref_mut.queue_next = self.queue2.clone();
 

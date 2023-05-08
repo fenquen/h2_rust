@@ -1,30 +1,35 @@
 use anyhow::Result;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use crate::h2_rust_common::{Byte, Integer, Long, Nullable};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use crate::h2_rust_common::{Byte, byte_buffer, Integer, Long, Nullable};
 use crate::h2_rust_common::Nullable::NotNull;
 use std::{fs, i64};
 use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek};
+use std::io::SeekFrom::Start;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use crate::api::error_code;
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::h2_rust_common::file_lock::FileLock;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::message::db_error::DbError;
+use crate::mvstore::data_utils;
 use crate::store::fs::file_utils;
 use crate::throw;
 
 #[derive(Default)]
 pub struct FileStore {
     /// The number of read operations.
-    read_count: AtomicU64,
+    read_count: AtomicI64,
 
     /// The number of read bytes.
-    read_byte_count: AtomicU64,
+    read_byte_count: AtomicI64,
     /// The number of write operations.
-    write_count: AtomicU64,
+    write_count: AtomicI64,
     /// The number of written bytes.
-    write_byte_count: AtomicU64,
+    write_byte_count: AtomicI64,
 
     file_name: String,
     read_only: bool,
@@ -121,15 +126,23 @@ impl FileStore {
         self.file_size
     }
 
-    pub fn readFully(&self,position: Long, len: Integer) {
+    pub fn readFully(&mut self, position: usize, len: usize) -> Result<ByteBuffer> {
+        let mut byteBuffer = byte_buffer::allocate(len);
+        data_utils::readFully(self.file.as_ref().unwrap(), position, &mut byteBuffer);
+        self.read_count.fetch_add(1, Ordering::AcqRel);
+        self.read_byte_count.fetch_add(len as Long, Ordering::AcqRel);
 
-        todo!()
+        Ok(byteBuffer)
+    }
 
-       /* let dest = ByteBuffer.allocate(len);
-        DataUtils.readFully(fileChannel, position, dest);
-        readCount.incrementAndGet();
-        readByteCount.addAndGet(len);
-        return dest;*/
+    pub fn writeFully(&mut self, position: usize, src: &mut ByteBuffer) -> Result<()> {
+        let len = src.getRemaining();
+        self.file_size = Long::max(self.file_size, (position + len) as Long);
+        data_utils::writeFully(self.file.as_ref().unwrap(), position, src);
+        self.write_count.fetch_add(1, Ordering::AcqRel);
+        self.write_byte_count.fetch_add(len as Long, Ordering::AcqRel);
+
+        Ok(())
     }
 }
 
