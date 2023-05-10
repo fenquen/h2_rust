@@ -254,17 +254,18 @@ impl MVStore {
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
 
-        let mut page_ref = self.read_page_from_cache(position);
-        if page_ref.is_none() {
+        let mut pageTrait = self.read_page_from_cache(position);
+        if pageTrait.is_none() {
             let chunkSharedPtr = self.get_chunk(position)?;
             let pageOffset = data_utils::getPageOffset(position);
 
             let mut byteBuffer = get_ref!(chunkSharedPtr).readBufferForPage(self.file_store.clone(), pageOffset, position)?;
+            pageTrait = page::readFromByteBuffer(&mut byteBuffer, position, mvMap)?;
 
-            page_ref = page::readFromByteBuffer(&mut byteBuffer, position, mvMap);
+            self.cachePage(pageTrait.clone());
         }
 
-        todo!()
+        Ok(pageTrait)
     }
 
     fn read_page_from_cache(&mut self, position: Long) -> PageTraitSharedPtr {
@@ -312,6 +313,17 @@ impl MVStore {
 
     fn is_open_or_stopping(&self) -> bool {
         self.state.load(Ordering::Acquire) <= STATE_STOPPING
+    }
+
+    fn cachePage(&mut self, pageTrait: PageTraitSharedPtr) {
+        if self.page_cache.is_some() {
+            let position = get_ref!(pageTrait).getPosition();
+            let memory = get_ref!(pageTrait).getMemory();
+
+            self.page_cache.as_mut().unwrap().put(position,
+                                                  pageTrait,
+                                                  memory);
+        }
     }
 }
 

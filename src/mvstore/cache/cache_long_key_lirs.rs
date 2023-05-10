@@ -81,7 +81,10 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         cmp::max(1, self.max_memory / self.segment_count as Long)
     }
 
-    pub fn put(&mut self, key: Long, value: V, memory: Integer) {}
+
+    pub fn put(&mut self, key: Long, value: V, memory: Integer) {
+
+    }
 
     pub fn get(&mut self, key: Long) -> V {
         let hash = Self::get_hash(key);

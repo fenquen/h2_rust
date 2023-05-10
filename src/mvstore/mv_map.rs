@@ -161,7 +161,15 @@ impl MVMap where {
         self.root_reference.clone()
     }
 
-    pub fn get_key_type(&self) -> Arc<dyn DataType> {
+    pub fn getKeyType(&self) -> Arc<dyn DataType> {
         self.key_type.as_ref().unwrap().clone()
+    }
+
+    pub fn getValueType(&self) -> Arc<dyn DataType> {
+        self.value_type.as_ref().unwrap().clone()
+    }
+
+    pub fn getId(&self) -> Integer {
+        self.id
     }
 }

@@ -141,6 +141,21 @@ impl ByteBuffer {
         self.data[oldPosition + 3] = a as u8;
     }
 
+    pub fn getI64(&mut self) -> i64 {
+        let oldPosition = self.position;
+
+        self.advance(8);
+
+        (self.data[oldPosition] as i64) << 56 |
+            (self.data[oldPosition + 1] as i64) << 48 |
+            (self.data[oldPosition + 2] as i64) << 40 |
+            (self.data[oldPosition + 3] as i64) << 32 |
+            (self.data[oldPosition + 4] as i64) << 24 |
+            (self.data[oldPosition + 5] as i64) << 16 |
+            (self.data[oldPosition + 6] as i64) << 8 |
+            (self.data[oldPosition + 7] as i64)
+    }
+
     pub fn putSlice(&mut self, slice: &[u8]) {
         self.putSlice_(slice, 0, slice.len());
     }

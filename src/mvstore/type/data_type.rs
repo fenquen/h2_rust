@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
-use bytebuffer::ByteBuffer;
 use crate::h2_rust_common::Integer;
 use crate::mvstore::write_buffer::WriteBuffer;
 use Ordering::{Equal, Greater, Less};
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 
 pub trait DataType {
@@ -70,16 +70,16 @@ pub trait DataType {
     ///
     /// @param buff the source buffer
     /// @return the object
-    fn read_1(&self, byteBuffer: &ByteBuffer) -> H2RustType;
+    fn read_1(&self, byteBuffer: &mut ByteBuffer) -> H2RustType;
 
-    /// Read a list of objects.
+    /// Read a list of object
     ///
     /// @param buff    the target buffer
     /// @param storage the objects
     /// @param len     the number of objects to read
-    fn read_3(&self, buff: &ByteBuffer, storage: &mut Vec<H2RustType>, len: Integer) {
+    fn read_3(&self, byteBuffer: &mut ByteBuffer, storage: &mut Vec<H2RustType>, len: Integer) {
         for a in 0..len as usize {
-            storage[a] = self.read_1(&buff);
+            storage[a] = self.read_1(byteBuffer);
         }
     }
 

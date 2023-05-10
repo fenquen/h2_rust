@@ -1,6 +1,6 @@
 #![feature(thread_id_value)]
 #![feature(concat_idents)]
-#![allow(unused_assignments, unused_imports, dead_code, unused_variables, unused_must_use, non_snake_case)]
+#![allow(unused_assignments, unused_imports, dead_code, unused_variables, unused_must_use, non_snake_case, unused_macros)]
 
 mod jdbc;
 mod test;

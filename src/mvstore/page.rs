@@ -51,7 +51,7 @@ pub trait PageTrait {
     fn binary_search(&mut self, key: &H2RustType) -> Integer;
 
     /// 父类实现
-    fn get_key_count(&self) -> Integer;
+    fn getKeyCount(&self) -> Integer;
 
     /// 父类实现 直接在trait实现
     fn isLeaf(&self) -> bool {
@@ -76,7 +76,23 @@ pub trait PageTrait {
     /// 父类实现
     fn setPosition(&self, position: Long);
 
-    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()>;
+    /// 父类实现
+    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()>;
+
+    /// 父类实现
+    fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType>;
+
+    /// 父类实现
+    fn createValueStorage(&self, size: Integer) -> Vec<H2RustType>;
+
+    /// abstract
+    fn readPayLoad(&mut self, byteBuffer: &mut ByteBuffer);
+
+    /// 父类实现
+    fn is_persistent(&self) -> bool;
+
+    /// 父类实现
+    fn getMemory(&self) -> Integer;
 }
 
 pub type PageSharedPtr = Option<Arc<H2RustCell<Page>>>;
@@ -96,6 +112,9 @@ pub struct Page {
 
     /// 0-based number of the page within containing chunk,默认是-1
     pub pageNo: Integer,
+
+    /// amount of used disk space by this page only in persistent case
+    pub diskSpaceUsed: Integer,
 }
 
 impl Page {
@@ -136,10 +155,6 @@ impl Page {
     fn recalculate_memory(&mut self) {
         assert!(self.is_persistent());
         self.memory = self.calculate_memory();
-    }
-
-    fn is_persistent(&self) -> bool {
-        self.memory != IN_MEMORY
     }
 
     fn calculate_memory(&self) -> Integer {
@@ -197,8 +212,8 @@ impl PageTrait for Page {
 
     fn binary_search(&mut self, key: &H2RustType) -> Integer {
         let mv_map = get_ref!(self.mv_map);
-        let ket_type = mv_map.get_key_type();
-        let res = ket_type.binary_search(key, &self.keys, self.get_key_count(), self.cached_compare);
+        let keyType = mv_map.getKeyType();
+        let res = keyType.binary_search(key, &self.keys, self.getKeyCount(), self.cached_compare);
         self.cached_compare = if res < 0 {
             !res
         } else {
@@ -207,7 +222,7 @@ impl PageTrait for Page {
         res
     }
 
-    fn get_key_count(&self) -> Integer {
+    fn getKeyCount(&self) -> Integer {
         self.keys.len() as Integer
     }
 
@@ -235,12 +250,12 @@ impl PageTrait for Page {
         self.position.store(position, Ordering::Release);
     }
 
-    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
+    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
         let chunkId = data_utils::getPageChunkId(self.position.load(Ordering::Acquire));
         let offset = data_utils::getPageOffset(self.position.load(Ordering::Acquire));
 
         let start = byteBuffer.getPosition();
-        let pageLength = byteBuffer.getI32(); // does not include optional part (pageNo)
+        let pageLength = byteBuffer.getI32(); // does not include optional part (pageNo) length是包含自己本身的
         let remaining = byteBuffer.getRemaining() + 4;
         if pageLength as usize > remaining || pageLength < 4 {
             throw!(DbError::get(error_code::FILE_CORRUPTED_1,
@@ -255,12 +270,74 @@ impl PageTrait for Page {
             throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected check value {}, got {}", chunkId, checkTest, check));
         }
 
+        // pageNo
         self.pageNo = data_utils::readVarInt(byteBuffer);
         if self.pageNo < 0 {
             throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, got negative page No {}", chunkId, self.pageNo));
         }
 
+        // mapId
+        let mvMapId = data_utils::readVarInt(byteBuffer);
+        if mvMapId != get_ref!(self.mv_map).getId() {
+            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected map id {}, got {}", chunkId, get_ref!(self.mv_map).getId(), mvMapId));
+        }
+
+        // keyCount
+        let keyCount = data_utils::readVarInt(byteBuffer);
+        self.keys = self.createKeyStorage(keyCount);
+        let type7 = byteBuffer.getI8() as Integer;
+        if self.isLeaf() != ((type7 & 1) == data_utils::PAGE_TYPE_LEAF) {
+            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected node type {}, got {}", chunkId, if self.isLeaf() {"0"} else {"1"}, type7 ));
+        }
+
+        byteBuffer.setLimit(start + pageLength as usize);
+
+
+        if !self.isLeaf() {
+            // 需要由下边的实现子类来具体实现 抽象level里又涉及到子类的具体
+            // 虚实的结和
+            get_ref_mut!(actual).readPayLoad(byteBuffer);
+        }
+
+        // todo rust略过压缩
+
+        get_ref!(self.mv_map).getKeyType().read_3(byteBuffer, &mut self.keys, keyCount);
+
+        if self.isLeaf() {
+            get_ref_mut!(actual).readPayLoad(byteBuffer);
+        }
+
+        self.diskSpaceUsed = pageLength;
+
+        self.recalculate_memory();
+
         Ok(())
+    }
+
+    fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType> {
+        let keyType = get_ref!(self.mv_map).getKeyType();
+        keyType.create_storage(size)
+    }
+
+    fn createValueStorage(&self, size: Integer) -> Vec<H2RustType> {
+        let valueType = get_ref!(self.mv_map).getValueType();
+        valueType.create_storage(size)
+    }
+
+    fn readPayLoad(&mut self, byteBuffer: &mut ByteBuffer) {
+        unimplemented!("abstract 需要由子类实现")
+    }
+
+    fn is_persistent(&self) -> bool {
+        self.memory != IN_MEMORY
+    }
+
+    fn getMemory(&self) -> Integer {
+        if self.is_persistent() {
+            self.memory
+        } else {
+            0
+        }
     }
 }
 
@@ -314,8 +391,8 @@ impl PageTrait for Leaf {
         get_ref_mut!(self.page).binary_search(key)
     }
 
-    fn get_key_count(&self) -> Integer {
-        get_ref_mut!(self.page).get_key_count()
+    fn getKeyCount(&self) -> Integer {
+        get_ref_mut!(self.page).getKeyCount()
     }
 
     fn getNodeType(&self) -> Integer {
@@ -334,7 +411,7 @@ impl PageTrait for Leaf {
     }
 
     fn getTotalCount(&self) -> Long {
-        self.get_key_count() as Long
+        self.getKeyCount() as Long
     }
 
     fn getPosition(&self) -> Long {
@@ -345,8 +422,33 @@ impl PageTrait for Leaf {
         get_ref!(self.page).setPosition(position);
     }
 
-    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
-        get_ref_mut!(self.page).readFromByteBuffer(byteBuffer)
+    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
+        get_ref_mut!(self.page).readFromByteBuffer(actual, byteBuffer)
+    }
+
+    fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType> {
+        get_ref!(self.page).createKeyStorage(size)
+    }
+
+    fn createValueStorage(&self, size: Integer) -> Vec<H2RustType> {
+        get_ref!(self.page).createValueStorage(size)
+    }
+
+    fn readPayLoad(&mut self, byteBuffer: &mut ByteBuffer) {
+        let keyCount = self.getKeyCount();
+        self.values = self.createValueStorage(keyCount);
+
+        let page = get_ref!(self.page);
+
+        get_ref!(page.mv_map).getValueType().read_3(byteBuffer, &mut self.values, keyCount);
+    }
+
+    fn is_persistent(&self) -> bool {
+        get_ref!(self.page).is_persistent()
+    }
+
+    fn getMemory(&self) -> Integer {
+        get_ref!(self.page).getMemory()
     }
 }
 
@@ -378,7 +480,7 @@ impl NonLeaf {
 
     fn calculateTotalCount(&self) -> Long {
         let mut totalCount = 0;
-        let keyCount = self.get_key_count();
+        let keyCount = self.getKeyCount();
         for a in 0 as usize..keyCount as usize + 1 {
             totalCount = totalCount + get_ref!(self.children.get(a).unwrap()).count;
         }
@@ -395,8 +497,8 @@ impl PageTrait for NonLeaf {
         get_ref_mut!(self.page).binary_search(key)
     }
 
-    fn get_key_count(&self) -> Integer {
-        get_ref_mut!(self.page).get_key_count()
+    fn getKeyCount(&self) -> Integer {
+        get_ref_mut!(self.page).getKeyCount()
     }
 
     fn getNodeType(&self) -> Integer {
@@ -437,8 +539,57 @@ impl PageTrait for NonLeaf {
         get_ref!(self.page).setPosition(position);
     }
 
-    fn readFromByteBuffer(&mut self, byteBuffer: &mut ByteBuffer) -> Result<()> {
-        get_ref_mut!(self.page).readFromByteBuffer(byteBuffer)
+    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
+        get_ref_mut!(self.page).readFromByteBuffer(actual, byteBuffer)
+    }
+
+    fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType> {
+        get_ref!(self.page).createKeyStorage(size)
+    }
+
+    fn createValueStorage(&self, size: Integer) -> Vec<H2RustType> {
+        todo!()
+    }
+
+    fn readPayLoad(&mut self, byteBuffer: &mut ByteBuffer) {
+        let keyCount = get_ref!(self.page).getKeyCount();
+        self.children = createRefStorage((keyCount + 1) as usize);
+
+        let mut positions = Vec::with_capacity(keyCount as usize + 1);
+        for a in 0..keyCount as usize {
+            positions[a] = byteBuffer.getI64();
+        }
+
+        let mut total: i64 = 0;
+
+        for a in 0..keyCount as usize {
+            let count = data_utils::readVarLong(byteBuffer);
+
+            let position = positions[a];
+            if position == 0 {
+                assert_eq!(count, 0);
+            } else {
+                assert!(count >= 0);
+            }
+
+            total += count;
+
+            self.children[a] = if position == 0 {
+                PageReference::empty()
+            } else {
+                PageReference::new2(position, count)
+            };
+        }
+
+        self.totalCount = total;
+    }
+
+    fn is_persistent(&self) -> bool {
+        get_ref!(self.page).is_persistent()
+    }
+
+    fn getMemory(&self) -> Integer {
+        get_ref!(self.page).getMemory()
     }
 }
 
@@ -446,8 +597,9 @@ pub type PageReferenceSharedPtr = Option<Arc<H2RustCell<PageReference>>>;
 
 lazy_static! {
     /// Singleton object used when arrays of PageReference have not yet been filled
-    static ref EMPTY:PageReferenceSharedPtr = PageReference::new(None, 0, 0);
+    static ref EMPTY:PageReferenceSharedPtr = PageReference::new3(None, 0, 0);
 }
+
 #[derive(Default)]
 pub struct PageReference {
     /// The position, if known, or 0.
@@ -461,16 +613,27 @@ pub struct PageReference {
 }
 
 impl PageReference {
-    pub fn new(page: PageTraitSharedPtr, position: Long, count: Long) -> PageReferenceSharedPtr {
-        build_option_arc_h2RustCell!( PageReference{
+    pub fn new3(page: PageTraitSharedPtr, position: Long, count: Long) -> PageReferenceSharedPtr {
+        build_option_arc_h2RustCell!(PageReference{
             page,
             position,
             count
         })
     }
+
+    pub fn new2(position: Long, count: Long) -> PageReferenceSharedPtr {
+        build_option_arc_h2RustCell!(PageReference{
+            page:None,
+            position,
+            count
+        })
+    }
+    pub fn empty() -> PageReferenceSharedPtr {
+        EMPTY.clone()
+    }
 }
 
-pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: MVMapSharedPtr) -> PageTraitSharedPtr {
+pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: MVMapSharedPtr) -> Result<PageTraitSharedPtr> {
     let isLeaf = (data_utils::getPageType(position) & 1) == data_utils::PAGE_TYPE_LEAF;
 
     let pageTrait = if isLeaf {
@@ -483,7 +646,11 @@ pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: MV
 
     get_ref!(pageTrait).setPosition(position);
 
-    get_ref_mut!(pageTrait).readFromByteBuffer(byteBuffer);
+    get_ref_mut!(pageTrait).readFromByteBuffer(pageTrait.clone(), byteBuffer)?;
 
-    pageTrait
+    Ok(pageTrait)
+}
+
+pub fn createRefStorage(size: usize) -> Vec<PageReferenceSharedPtr> {
+    Vec::with_capacity(size)
 }

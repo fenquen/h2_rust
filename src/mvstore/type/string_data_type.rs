@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
-use bytebuffer::ByteBuffer;
 use lazy_static::lazy_static;
 use crate::build_arc_h2RustCell;
 use crate::h2_rust_common::{h2_rust_constant, Integer};
+use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::h2_rust_type::H2RustType::String;
 use crate::mvstore::r#type::basic_data_type::BasicDataType;
@@ -46,7 +46,7 @@ impl DataType for StringDataType {
         }
     }
 
-    fn read_1(&self, byteBuffer: &ByteBuffer) -> H2RustType {
+    fn read_1(&self, byteBuffer: &mut ByteBuffer) -> H2RustType {
         String(build_arc_h2RustCell!(h2_rust_constant::EMPTY_STR.to_string()))
     }
 

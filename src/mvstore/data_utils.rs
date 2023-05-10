@@ -365,3 +365,51 @@ pub fn readVarIntRest(byteBuffer: &mut ByteBuffer, mut b: i32) -> i32 {
 
     x
 }
+
+pub fn readVarLong(bytebuffer: &mut ByteBuffer) -> i64 {
+    let mut x: i64 = bytebuffer.getI8() as i64;
+    if x >= 0 {
+        return x;
+    }
+
+    x &= 0x7f;
+
+    let mut s = 7;
+    loop {
+        if s >= 64 {
+            break;
+        }
+
+        let b: i64 = bytebuffer.getI8() as i64;
+        x |= (b & 0x7f) << s;
+
+        if b >= 0 {
+            break;
+        }
+
+        s += 7
+    }
+
+    x
+}
+
+pub fn readString1(byteBuffer: &mut ByteBuffer) -> String {
+    let len = readVarInt(byteBuffer) as usize;
+    readString2(byteBuffer, len)
+}
+
+pub fn readString2(byteBuffer: &mut ByteBuffer, len: usize) -> String {
+    let mut chars: Vec<u8> = Vec::with_capacity(len);
+    for a in 0..len {
+        let x = byteBuffer.getI8() as i32 & 0xff;
+        if x < 0x80 {
+            chars[a] = x as u8;
+        } else if x >= 0xe0 {
+            chars[a] = ((x & 0xf) << 12 + (byteBuffer.getI8() & 0x3f) << 6 + byteBuffer.getI8() & 0x3f) as u8;
+        } else {
+            chars[a] = ((x & 0x1f) << 6 + byteBuffer.getI8() & 0x3f) as u8;
+        }
+    }
+    String::from_utf8(chars).unwrap()
+}
+
