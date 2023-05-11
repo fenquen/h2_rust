@@ -38,7 +38,18 @@ impl<T: ?Sized> H2RustCell<T> {
 #[macro_export]
 macro_rules! h2_rust_cell_equals {
     ($self:expr, $other:expr) => {
-        $self.as_ref().unwrap().equals($other.as_ref().unwrap())
+        {
+            let a = $self.is_some();
+            let b = $other.is_some();
+
+            if !a && !b {
+                true
+            } else if a && b {
+                $self.as_ref().unwrap().equals($other.as_ref().unwrap())
+            } else {
+                false
+            }
+        }
     };
 }
 

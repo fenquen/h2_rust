@@ -52,7 +52,7 @@ pub fn parse_bool(s: &str, default_value: bool, throw_exception: bool) -> Result
 }
 
 pub fn scale_for_available_memory(value: Integer) -> Integer {
-    match h2_rust_utils::get_total_physical_memory_size() {
+    match h2_rust_utils::getTotalPhysicalMemorySize() {
         Ok(total) => {
             let mut a = total as Integer / h2_rust_constant::GB;
             if a == 0 {
