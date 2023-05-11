@@ -175,7 +175,7 @@ impl MVStore {
             mvStoreMutRef.retention_time = h2_rust_cell_call!(mvStoreMutRef.file_store, get_default_retention_time);
 
             // 19 KB memory is about 1 KB storage
-            let mut kb = Integer::max(1, Integer::min(19, utils::scale_for_available_memory(64))) * 1024;
+            let mut kb = Integer::max(1, Integer::min(19, utils::scaleForAvailableMemory(64))) * 1024;
             kb = data_utils::get_config_int_param(config, "autoCommitBufferSize", kb);
             mvStoreMutRef.auto_commit_memory = kb * 1024;
 

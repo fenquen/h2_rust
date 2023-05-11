@@ -39,7 +39,7 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         data_utils::check_argument(Integer::count_ones(config.segment_count) == 1, "segment count must be a power of 2");
         self.segment_count = config.segment_count;
 
-        self.set_max_memory(config.max_memory);
+        self.setMaxMemory(config.max_memory);
         self.non_resident_queue_size = config.non_resident_queue_size;
         self.non_resident_queue_size_high = config.non_resident_queue_size_high;
 
@@ -53,7 +53,7 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         self.segment_shift = (32 - Integer::count_ones(self.segment_mask)) as Integer;
     }
 
-    pub fn set_max_memory(&mut self, max_memory: Long) {
+    pub fn setMaxMemory(&mut self, max_memory: Long) {
         data_utils::check_argument(max_memory > 0, "Max memory must be larger than 0");
         self.max_memory = max_memory;
 

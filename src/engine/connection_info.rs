@@ -288,7 +288,7 @@ impl ConnectionInfo {
         }
 
         if self.persistent && !self.remote {
-            self.name = io_utils::name_separators_to_native(&self.name);
+            self.name = io_utils::nameSeparators2Native(&self.name);
         }
     }
 

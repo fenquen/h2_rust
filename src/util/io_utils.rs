@@ -1,3 +1,3 @@
-pub fn name_separators_to_native(path: &str) -> String {
+pub fn nameSeparators2Native(path: &str) -> String {
     path.replace("\\", "/")
 }
