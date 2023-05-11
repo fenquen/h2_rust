@@ -198,7 +198,7 @@ impl MVStore {
                 }
 
                 if h2_rust_cell_call!(mvStoreMutRef.file_store, size) == 0 {
-                    mvStoreMutRef.creation_time = h2_rust_utils::get_timestamp();
+                    mvStoreMutRef.creation_time = h2_rust_utils::getTimestamp();
 
                     mvStoreMutRef.store_header.insert(HDR_H.to_string(), Box::new(2));
                     mvStoreMutRef.store_header.insert(HDR_BLOCK_SIZE.to_string(), Box::new(BLOCK_SIZE));

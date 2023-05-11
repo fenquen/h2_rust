@@ -103,14 +103,14 @@ pub fn cast<T: 'static>(object: Option<Box<dyn Any>>) -> Option<Box<T>> {
 }
 
 
-pub fn get_total_physical_memory_size() -> Result<Long> {
+pub fn getTotalPhysicalMemorySize() -> Result<Long> {
     match sys_info::mem_info() {
         Ok(mem_info) => Ok(mem_info.total as Long * 1024),// 原始得到的kb
         Err(e) => Err(anyhow::Error::from(e))
     }
 }
 
-pub fn get_timestamp() -> Long {
+pub fn getTimestamp() -> Long {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
