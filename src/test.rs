@@ -93,6 +93,8 @@ use std::time::Duration;
 use atomic_refcell::AtomicRefCell;
 use crossbeam::atomic::AtomicCell;
 use parking_lot::RwLockWriteGuard;
+use usync::lock_api::RawMutex;
+use usync::ReentrantMutex;
 use crate::h2_rust_cell_mut_call;
 use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
@@ -813,4 +815,17 @@ fn test_ref_cell_replace() {
     println!("{}", c.get_addr()); // 地址不变
 
     println!("{}", c.get_ref().0);
+}
+
+#[test]
+fn testRawReLock() {
+    let a = ReentrantMutex::<()>::default();
+
+    let raw = unsafe { a.raw() };
+
+    raw.lock();
+    raw.lock(); // 死锁
+
+    unsafe { raw.unlock(); };
+    unsafe { raw.unlock(); };
 }

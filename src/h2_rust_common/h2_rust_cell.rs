@@ -50,7 +50,7 @@ macro_rules! h2_rust_cell_equals {
                 false
             }
         }
-    };
+    }
 }
 
 unsafe impl<T: ?Sized> Send for H2RustCell<T> {}
