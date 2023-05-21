@@ -1,13 +1,13 @@
 use std::cmp;
 use std::env::var;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use usync::lock_api::RawMutex;
 use usync::ReentrantMutex;
 use crate::{build_option_arc_h2RustCell, db_error_template, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_minus_minus, suffix_plus_plus, throw, unsigned_right_shift};
 use crate::api::error_code;
-use crate::h2_rust_common::{Integer, Long, MyMutex, Nullable, Optional, ULong};
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::{Downgrade7, Integer, IntoOriginal, IntoWeak, Long, MyMutex, Nullable, Optional, ULong, Upgrade};
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
 use crate::mvstore::page::{get, Page};
@@ -16,20 +16,20 @@ use crate::message::db_error::DbError;
 use anyhow::Result;
 
 #[derive(Default)]
-pub struct CacheLongKeyLIRS<V> {
+pub struct CacheLongKeyLIRS<V, R> {
     /// the maximum memory this cache should use.
-    max_memory: Long,
-    segmentArr: Option<Vec<SegmentRef<V>>>,
-    segment_count: Integer,
-    segment_shift: Integer,
-    segment_mask: Integer,
-    stack_move_distance: Integer,
+    maxMemory: Long,
+    segmentArr: Option<Vec<SharedPtr<Segment<V, R>>>>,
+    segmentCount: Integer,
+    segmentShift: Integer,
+    segmentMask: Integer,
+    stackMoveDistance: Integer,
     non_resident_queue_size: Integer,
     non_resident_queue_size_high: Integer,
 }
 
-impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
-    pub fn new(config: &CacheLongKeyLIRSConfig) -> CacheLongKeyLIRS<V> {
+impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> CacheLongKeyLIRS<V, R> {
+    pub fn new(config: &CacheLongKeyLIRSConfig) -> CacheLongKeyLIRS<V, R> {
         let mut cache_long_key_lirs = CacheLongKeyLIRS::default();
         cache_long_key_lirs.init(config);
         cache_long_key_lirs
@@ -37,25 +37,25 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
 
     pub fn init(&mut self, config: &CacheLongKeyLIRSConfig) {
         data_utils::check_argument(Integer::count_ones(config.segment_count) == 1, "segment count must be a power of 2");
-        self.segment_count = config.segment_count;
+        self.segmentCount = config.segment_count;
 
         self.setMaxMemory(config.max_memory);
         self.non_resident_queue_size = config.non_resident_queue_size;
         self.non_resident_queue_size_high = config.non_resident_queue_size_high;
 
-        self.segment_mask = self.segment_count - 1;
-        self.stack_move_distance = config.stack_move_distance;
-        self.segmentArr = Some(Vec::<SegmentRef<V>>::with_capacity(self.segment_count as usize));
+        self.segmentMask = self.segmentCount - 1;
+        self.stackMoveDistance = config.stack_move_distance;
+        self.segmentArr = Some(Vec::<SharedPtr<Segment<V, R>>>::with_capacity(self.segmentCount as usize));
 
         self.clear();
 
         // use the high bits for the segment
-        self.segment_shift = (32 - Integer::count_ones(self.segment_mask)) as Integer;
+        self.segmentShift = (32 - Integer::count_ones(self.segmentMask)) as Integer;
     }
 
     pub fn setMaxMemory(&mut self, max_memory: Long) {
         data_utils::check_argument(max_memory > 0, "Max memory must be larger than 0");
-        self.max_memory = max_memory;
+        self.maxMemory = max_memory;
 
         if self.segmentArr.is_some() {
             let segment_arr = self.segmentArr.as_mut().unwrap();
@@ -69,10 +69,10 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
     pub fn clear(&mut self) {
         let max = self.get_max_item_size();
         let segment_arr = self.segmentArr.as_mut().unwrap();
-        for _ in 0..self.segment_count {
-            segment_arr.push(build_option_arc_h2RustCell!(Segment::<V>::new5(
+        for _ in 0..self.segmentCount {
+            segment_arr.push(build_option_arc_h2RustCell!(Segment::<V,R>::new5(
                 max,
-                self.stack_move_distance,
+                self.stackMoveDistance,
                 8,
                 self.non_resident_queue_size,
                 self.non_resident_queue_size_high)));
@@ -81,9 +81,8 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
 
     /// determines max size of the data item size to fit into cache
     pub fn get_max_item_size(&self) -> Long {
-        cmp::max(1, self.max_memory / self.segment_count as Long)
+        cmp::max(1, self.maxMemory / self.segmentCount as Long)
     }
-
 
     pub fn put(&mut self, key: Long, value: V, memory: Integer) -> Result<()> {
         if value.is_none() {
@@ -106,7 +105,7 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         Ok(())
     }
 
-    fn resizeIfNeeded(&mut self, mut segmentRef: SegmentRef<V>, segmentIndex: usize) -> SegmentRef<V> {
+    fn resizeIfNeeded(&mut self, mut segmentRef: SharedPtr<Segment<V, R>>, segmentIndex: usize) -> SharedPtr<Segment<V, R>> {
         let newLen = get_ref!(segmentRef).getNewMapLen();
         if newLen == 0 {
             return segmentRef;
@@ -116,7 +115,7 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         let s2 = self.segmentArr.as_ref().unwrap().get(segmentIndex);
         if segmentRef.as_ref().unwrap().equals(s2.unwrap().as_ref().unwrap()) {
             // no other thread resized, so we do
-            segmentRef = Segment::<V>::new2(segmentRef.clone(), newLen);
+            segmentRef = Segment::<V, R>::new2(segmentRef.clone(), newLen);
             self.segmentArr.as_mut().unwrap().insert(segmentIndex, segmentRef.clone());
         }
 
@@ -130,12 +129,12 @@ impl<V: Default + Clone + Optional> CacheLongKeyLIRS<V> {
         get_ref_mut!(segment_ref).get(entry_ref) // 因为该函数内部需要V上有Optional相应函数使得CacheLongKeyLIRS的V也要实现Optional,部下污染了上头
     }
 
-    fn get_segment(&self, hash: Integer) -> &SegmentRef<V> {
+    fn get_segment(&self, hash: Integer) -> &SharedPtr<Segment<V, R>> {
         self.segmentArr.as_ref().unwrap().get(self.getSegmentIndex(hash) as usize).unwrap()
     }
 
     fn getSegmentIndex(&self, hash: Integer) -> Integer {
-        unsigned_right_shift!(hash, self.segment_shift, Integer) & self.segment_mask
+        unsigned_right_shift!(hash, self.segmentShift, Integer) & self.segmentMask
     }
 }
 
@@ -149,18 +148,16 @@ fn getHash(key: Long) -> Integer {
     hash
 }
 
-pub type SegmentRef<V> = Option<Arc<H2RustCell<Segment<V>>>>;
-
 #[derive(Default)]
-pub struct Segment<V> {
+pub struct Segment<V, R> {
     /// The number of (hot, cold, and non-resident) entries in the map.
     mapSize: Integer,
 
     /// The size of the LIRS queue for resident cold entries.
-    queue_size: Integer,
+    queueSize: Integer,
 
     /// The size of the LIRS queue for non-resident cold entries.
-    queue2size: Integer,
+    queue2Size: Integer,
 
     /// The number of cache hits.
     hits: Long,
@@ -169,7 +166,7 @@ pub struct Segment<V> {
     misses: Long,
 
     /// The map array. The size is always a power of 2.
-    entries: Vec<EntrySharedPtr<V>>,
+    entries: Vec<SharedPtr<Entry<V, R>>>,
 
     /// The currently used memory.
     usedMemory: Long,
@@ -199,18 +196,18 @@ pub struct Segment<V> {
     /// entries that were not recently referenced, as well as non-resident cold entries, are not in the stack.
     ///
     /// There is always at least one entry: the head entry.
-    stack: EntrySharedPtr<V>,
+    stack: SharedPtr<Entry<V, R>>,
 
     /// The number of entries in the stack.
     stackSize: Integer,
 
     /// The queue of resident cold entries <br>
     /// There is always at least one entry: the head entry.
-    queue: EntrySharedPtr<V>,
+    queue: SharedPtr<Entry<V, R>>,
 
     /// The queue of non-resident cold entries.
     /// There is always at least one entry: the head entry.
-    queue2: EntrySharedPtr<V>,
+    queue2: SharedPtr<Entry<V, R>>,
 
     /// The number of times any item was moved to the top of the stack.
     stackMoveRoundCount: Integer,
@@ -222,17 +219,17 @@ pub struct Segment<V> {
     hitCount: Integer,
 }
 
-impl<V: Default + Clone + Optional> Segment<V> {
-    pub fn default1() -> Segment<V> {
-        let mut segment: Segment<V> = Default::default();
+impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> Segment<V, R> {
+    pub fn default1() -> Segment<V, R> {
+        let mut segment: Segment<V, R> = Default::default();
         segment.reentrantMutexPtr = build_option_arc_h2RustCell!(ReentrantMutex::<()>::default());
         segment
     }
 
-    pub fn new2(old: SegmentRef<V>, len: Integer) -> SegmentRef<V> {
+    pub fn new2(old: SharedPtr<Segment<V, R>>, len: Integer) -> SharedPtr<Segment<V, R>> {
         let old = get_ref!(old);
 
-        let mut segment = Segment::<V>::default1();
+        let mut segment = Segment::<V, R>::default1();
 
         Self::init5(&mut segment, old.maxMemory,
                     old.stackMoveDistance,
@@ -245,7 +242,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
 
         let mut entrySharedPtr = get_ref!(old.stack).stackPrev.clone();
         while !h2_rust_cell_equals!(entrySharedPtr , old.stack) {
-            let e = Entry::<V>::new1(&entrySharedPtr);
+            let e = Entry::<V, R>::new1(&entrySharedPtr);
             segment.addToMap(e.clone());
             segment.addToStack(e);
             entrySharedPtr = get_ref!(entrySharedPtr).stackPrev.clone();
@@ -255,7 +252,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         while !h2_rust_cell_equals!(entrySharedPtr, old.queue) {
             let mut e = segment.find(get_ref!(entrySharedPtr).key, getHash(get_ref!(entrySharedPtr).key));
             if e.is_none() {
-                e = Entry::<V>::new1(&entrySharedPtr);
+                e = Entry::<V, R>::new1(&entrySharedPtr);
                 segment.addToMap(e.clone());
             }
             segment.addToQueue(segment.queue.clone(), e);
@@ -266,7 +263,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         while !h2_rust_cell_equals!(entrySharedPtr, old.queue2) {
             let mut e = segment.find(get_ref!(entrySharedPtr).key, getHash(get_ref!(entrySharedPtr).key));
             if e.is_none() {
-                e = Entry::<V>::new1(&entrySharedPtr);
+                e = Entry::<V, R>::new1(&entrySharedPtr);
                 segment.addToMap(e.clone());
             }
             segment.addToQueue(segment.queue2.clone(), e);
@@ -280,8 +277,8 @@ impl<V: Default + Clone + Optional> Segment<V> {
                 stackMoveDistance: Integer,
                 len: Integer,
                 nonResidentQueueSize: Integer,
-                nonResidentQueueSizeHigh: Integer) -> Segment<V> {
-        let mut segment = Segment::<V>::default1();
+                nonResidentQueueSizeHigh: Integer) -> Segment<V, R> {
+        let mut segment = Segment::<V, R>::default1();
         Self::init5(&mut segment,
                     max_memory,
                     stackMoveDistance,
@@ -321,11 +318,11 @@ impl<V: Default + Clone + Optional> Segment<V> {
         ref_mut.queuePrev = self.queue2.clone();
         ref_mut.queueNext = self.queue2.clone();
 
-        self.entries = Vec::<EntrySharedPtr<V>>::with_capacity(len as usize);
+        self.entries = Vec::<SharedPtr<Entry<V, R>>>::with_capacity(len as usize);
         self.entries.fill(None);
     }
 
-    pub fn find(&self, key: Long, hash: Integer) -> EntrySharedPtr<V> {
+    pub fn find(&self, key: Long, hash: Integer) -> SharedPtr<Entry<V, R>> {
         let index = hash & self.mask;
         // entries的大小是和mask联动的 mask=len-1 故烦心在get后unwrap
         let mut entrySharedPtr = self.entries.get(index as usize).unwrap();
@@ -336,7 +333,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         entrySharedPtr.clone()
     }
 
-    pub fn get(&mut self, entry_ref: EntrySharedPtr<V>) -> V {
+    pub fn get(&mut self, entry_ref: SharedPtr<Entry<V, R>>) -> V {
         let clone = self.reentrantMutexPtr.clone();
         let mutexGuard = get_ref!(clone).lock();
 
@@ -359,8 +356,8 @@ impl<V: Default + Clone + Optional> Segment<V> {
         return value;
     }
 
-    fn access(&mut self, entry_ref: EntrySharedPtr<V>) {
-        let entry = get_ref!(entry_ref);
+    fn access(&mut self, entry_ref: SharedPtr<Entry<V, R>>) {
+        let entry = get_ref_mut!(entry_ref);
         if entry.isHot() { // stack体系动手
             if h2_rust_cell_equals!(entry_ref, get_ref!(self.stack).stackNext) && entry.stackNext.is_some() {
                 if self.stackMoveRoundCount - entry.topMove > self.stackMoveDistance {
@@ -383,6 +380,12 @@ impl<V: Default + Clone + Optional> Segment<V> {
             }
 
             self.removeFromQueue(entry_ref.clone());
+
+            if entry.weakReference.is_some() {
+                entry.value = value;
+                entry.weakReference = Default::default();
+                self.usedMemory += entry.memory as Long;
+            }
 
             if entry.stackNext.is_some() {
                 // resident, or even non-resident (weak value reference),
@@ -427,17 +430,17 @@ impl<V: Default + Clone + Optional> Segment<V> {
             return old;
         }
 
-        entry = Entry::<V>::new3(key, value, memory);
+        entry = Entry::<V, R>::new3(key, value, memory);
 
         let index = (hash & self.mask) as usize;
 
         get_ref_mut!(entry).mapNext = self.entries[index].clone();
         self.entries[index] = entry.clone();
 
-        self.usedMemory += memory;
+        self.usedMemory += memory as Long;
         if self.usedMemory > self.maxMemory {
             // old entries needs to be removed
-            evict();
+            self.evict();
         }
 
         old
@@ -457,7 +460,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         if get_ref!(entry).key == key {
             self.entries[index] = get_ref!(entry).mapNext.clone();
         } else {
-            let mut last: EntrySharedPtr<V>;
+            let mut last: SharedPtr<Entry<V, R>>;
             loop {
                 last = entry.clone();
                 entry = get_ref!(entry).mapNext.clone();
@@ -501,21 +504,65 @@ impl<V: Default + Clone + Optional> Segment<V> {
         old
     }
 
-
     /// evict cold entries (resident and non-resident) until the memory limit
     /// is reached. The new entry is added as a cold entry, except if it is the only entry.
     fn evict(&mut self) {
         loop {
-            evictBlock();
+            self.evictBlock();
 
-            if usedMemory > maxMemory{
-
+            if self.usedMemory > self.maxMemory {
+                break;
             }
         }
     }
 
+    fn evictBlock(&mut self) {
+        // ensure there are not too many hot entries: right shift of 5 is
+        // division by 32, that means if there are only 1/32 (3.125%) or
+        // less cold entries, a hot entry needs to become cold
+        while self.queueSize <= (unsigned_right_shift!(self.mapSize - self.queue2Size, 5, Integer)) && self.stackSize > 0 {
+            self.convertOldestHotToCold();
+        }
+
+        // the oldest resident cold entries become non-resident
+        while self.usedMemory > self.maxMemory && self.queueSize > 0 {
+            let entrySharedPtr = get_ref!(self.queue).queuePrev.clone();
+            self.usedMemory -= get_ref!(entrySharedPtr).memory as Long;
+
+            self.removeFromQueue(entrySharedPtr.clone());
+
+            get_ref_mut!(entrySharedPtr).weakReference = get_ref!(entrySharedPtr).value.downgrade7().intoWeak();
+            get_ref_mut!(entrySharedPtr).value = V::default();
+
+            self.addToQueue(self.queue2.clone(), entrySharedPtr);
+
+            // the size of the non-resident-cold entries needs to be limited
+            self.trimNonResidentQueue();
+        }
+    }
+
+    fn trimNonResidentQueue(&mut self) {
+        let residentCount = self.mapSize - self.queue2Size;
+
+        let maxQueue2SizeHigh = self.nonResidentQueueSizeHigh * residentCount;
+        let maxQueue2Size = self.nonResidentQueueSize * residentCount;
+
+        while self.queue2Size > maxQueue2Size {
+            let entry = get_ref!(self.queue2).queuePrev.clone();
+            if self.queue2Size <= maxQueue2SizeHigh {
+                let weakReference = get_ref!(entry).weakReference.clone();
+                if weakReference.is_some()  && weakReference.upgrade().intoOriginal().is_some() {
+                    break;  // stop trimming if entry holds a value
+                }
+            }
+
+            let hash = getHash(get_ref!(entry).key);
+            self.remove(get_ref!(entry).key, hash);
+        }
+    }
+
     /// Remove the entry from the stack. The head itself must not be removed.
-    fn removeFromStack(&mut self, entry_ref: EntrySharedPtr<V>) {
+    fn removeFromStack(&mut self, entry_ref: SharedPtr<Entry<V, R>>) {
         let entry = get_ref_mut!(entry_ref);
         get_ref_mut!(entry.stackPrev).stackNext = entry.stackNext.clone();
         get_ref_mut!(entry.stackNext).stackPrev = entry.stackPrev.clone();
@@ -540,7 +587,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         }
     }
 
-    fn addToStack(&mut self, entry: EntrySharedPtr<V>) {
+    fn addToStack(&mut self, entry: SharedPtr<Entry<V, R>>) {
         let entryMutRef = get_ref_mut!(entry);
 
         entryMutRef.stackPrev = self.stack.clone();
@@ -554,7 +601,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         self.stackMoveRoundCount = self.stackMoveRoundCount + 1;
     }
 
-    fn addToStackBottom(&mut self, entry: EntrySharedPtr<V>) {
+    fn addToStackBottom(&mut self, entry: SharedPtr<Entry<V, R>>) {
         let entryMutRef = get_ref_mut!(entry);
 
         entryMutRef.stackNext = self.stack.clone();
@@ -564,7 +611,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         suffix_plus_plus!(self.stackSize);
     }
 
-    fn removeFromQueue(&mut self, entry_ref: EntrySharedPtr<V>) {
+    fn removeFromQueue(&mut self, entry_ref: SharedPtr<Entry<V, R>>) {
         let entry = get_ref_mut!(entry_ref);
 
         get_ref_mut!(entry.queuePrev).queueNext = entry.queueNext.clone();
@@ -573,9 +620,9 @@ impl<V: Default + Clone + Optional> Segment<V> {
         entry.queueNext = None;
 
         if entry.value.is_some() {
-            self.queue_size = self.queue_size - 1;
+            self.queueSize = self.queueSize - 1;
         } else {
-            self.queue2size = self.queue2size - 1;
+            self.queue2Size = self.queue2Size - 1;
         }
     }
 
@@ -597,7 +644,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         self.pruneStack();
     }
 
-    fn addToQueue(&mut self, queue: EntrySharedPtr<V>, entry_ref: EntrySharedPtr<V>) {
+    fn addToQueue(&mut self, queue: SharedPtr<Entry<V, R>>, entry_ref: SharedPtr<Entry<V, R>>) {
         let entry = get_ref_mut!(entry_ref);
 
         entry.queuePrev = queue.clone();
@@ -606,9 +653,9 @@ impl<V: Default + Clone + Optional> Segment<V> {
         get_ref_mut!(queue).queueNext = entry_ref.clone();
 
         if entry.value.is_some() {
-            suffix_plus_plus!(self.queue_size);
+            suffix_plus_plus!(self.queueSize);
         } else {
-            suffix_plus_plus!(self.queue2size);
+            suffix_plus_plus!(self.queue2Size);
         }
     }
 
@@ -631,7 +678,7 @@ impl<V: Default + Clone + Optional> Segment<V> {
         0
     }
 
-    fn addToMap(&mut self, entrySharedPtr: EntrySharedPtr<V>) {
+    fn addToMap(&mut self, entrySharedPtr: SharedPtr<Entry<V, R>>) {
         let entryMutRef = get_ref_mut!(entrySharedPtr);
 
         let index = (getHash(entryMutRef.key) & self.mask) as usize;
@@ -642,18 +689,16 @@ impl<V: Default + Clone + Optional> Segment<V> {
     }
 }
 
-pub type EntrySharedPtr<V> = Option<Arc<H2RustCell<Entry<V>>>>;
-
 #[derive(Default)]
-pub struct Entry<V> {
+pub struct Entry<V, R> {
     /// The key
     pub key: Long,
 
     /// The value. Set to null for non-resident-cold entries.
-    value: V,
+    value: V, // Option<Arc<H2RustCell<V>>>
 
     /// Weak reference to the value. Set to null for resident entries.
-    // WeakReference<V> reference;
+    weakReference: R, //Option<Weak<TypeInArc>>,
 
     /// The estimated memory used.
     memory: Integer,
@@ -662,27 +707,27 @@ pub struct Entry<V> {
     topMove: Integer,
 
     /// The next entry in the stack.
-    stackNext: EntrySharedPtr<V>,
+    stackNext: SharedPtr<Entry<V, R>>,
 
     /// The previous entry in the stack.
-    stackPrev: EntrySharedPtr<V>,
+    stackPrev: SharedPtr<Entry<V, R>>,
 
     /// The next entry in the queue (either the resident queue or the non-resident queue).
-    queueNext: EntrySharedPtr<V>,
+    queueNext: SharedPtr<Entry<V, R>>,
 
     /// The previous entry in the queue.
-    queuePrev: EntrySharedPtr<V>,
+    queuePrev: SharedPtr<Entry<V, R>>,
 
     /// The next entry in the map (the chained entry).
-    mapNext: EntrySharedPtr<V>,
+    mapNext: SharedPtr<Entry<V, R>>,
 }
 
-impl<V: Default + Clone + Optional> Entry<V> {
-    pub fn new0() -> EntrySharedPtr<V> {
+impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> Entry<V, R> {
+    pub fn new0() -> SharedPtr<Entry<V, R>> {
         build_option_arc_h2RustCell!(Entry::default())
     }
 
-    pub fn new3(key: Long, value: V, memory: Integer) -> EntrySharedPtr<V> {
+    pub fn new3(key: Long, value: V, memory: Integer) -> SharedPtr<Entry<V, R>> {
         let mut entry = Entry::default();
         entry.key = key;
         entry.value = value;
@@ -690,7 +735,7 @@ impl<V: Default + Clone + Optional> Entry<V> {
         build_option_arc_h2RustCell!(entry)
     }
 
-    pub fn new1(old: &EntrySharedPtr<V>) -> EntrySharedPtr<V> {
+    pub fn new1(old: &SharedPtr<Entry<V, R>>) -> SharedPtr<Entry<V, R>> {
         let mut entry = Entry::default();
 
         let old = get_ref!(old);

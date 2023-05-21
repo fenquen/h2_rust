@@ -1,5 +1,11 @@
 use std::cell::UnsafeCell;
-use std::mem;
+use std::{mem, ptr};
+use std::marker::PhantomData;
+use std::sync::{Arc, Weak};
+use crate::h2_rust_common::Optional;
+
+pub type SharedPtr<V> = Option<Arc<H2RustCell<V>>>;
+pub type WeakPtr<V> = Option<Weak<H2RustCell<V>>>;
 
 pub struct H2RustCell<T: ?Sized> {
     data: UnsafeCell<T>,
@@ -67,60 +73,6 @@ unsafe impl<T: ?Sized> Sync for H2RustCell<T> {}
         }
     }
 }*/
-
-#[macro_export]
-macro_rules! h2_rust_cell_call {
-    ($h2_rust_cell_option:ident, $func_name:ident) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref().$func_name()
-        }
-    };
-
-    ($h2_rust_cell_option:expr, $func_name:ident) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref().$func_name()
-        }
-    };
-
-    ($h2_rust_cell_option:ident, $func_name:ident, $($variant:expr),*) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref().$func_name($($variant),*)
-        }
-    };
-
-    ($h2_rust_cell_option:expr, $func_name:ident, $($variant:expr),*) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref().$func_name($($variant),*)
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! h2_rust_cell_mut_call {
-    ($h2_rust_cell_option:ident, $func_name:ident) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref_mut().$func_name()
-        }
-    };
-
-    ($h2_rust_cell_option:expr, $func_name:ident) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref_mut().$func_name()
-        }
-    };
-
-    ($h2_rust_cell_option:ident, $func_name:ident, $($variant:expr),*) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref_mut().$func_name($($variant),*)
-        }
-    };
-
-    ($h2_rust_cell_option:expr, $func_name:ident, $($variant:expr),*) => {
-        {
-            $h2_rust_cell_option.as_ref().unwrap().get_ref_mut().$func_name($($variant),*)
-        }
-    };
-}
 
 #[macro_export]
 macro_rules! get_ref {

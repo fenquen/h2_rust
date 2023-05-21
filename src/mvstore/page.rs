@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use lazy_static::lazy_static;
 use crate::engine::constant;
-use crate::{h2_rust_cell_call, h2_rust_cell_mut_call, get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template};
+use crate::{get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template};
 use crate::api::error_code;
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::h2_rust_type::H2RustType;
@@ -45,10 +45,10 @@ type PageRef = Option<Arc<H2RustCell<Page>>>;
 
 pub trait PageTrait {
     /// 父类实现
-    fn init_memory_account(&mut self, memory_count: Integer);
+    fn initMemoryCount(&mut self, memory_count: Integer);
 
     /// 父类实现
-    fn binary_search(&mut self, key: &H2RustType) -> Integer;
+    fn binarySearch(&mut self, key: &H2RustType) -> Integer;
 
     /// 父类实现
     fn getKeyCount(&self) -> Integer;
@@ -146,7 +146,7 @@ impl Page {
         assert!(mv_map_ref.is_some());
 
         let mut leaf = Leaf::new(mv_map_ref, keys, values);
-        leaf.init_memory_account(memory);
+        leaf.initMemoryCount(memory);
         let page_trait_ref = Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait>>;
         Some(page_trait_ref)
     }
@@ -180,7 +180,7 @@ impl Page {
 pub fn get(mut pageTraitSharedPtr: PageTraitSharedPtr, key: &H2RustType) -> H2RustType {
     loop {
         let pageTraitMutRef = get_ref_mut!(pageTraitSharedPtr);
-        let mut index = pageTraitMutRef.binary_search(key);
+        let mut index = pageTraitMutRef.binarySearch(key);
 
         if pageTraitMutRef.isLeaf() {
             return if index >= 0 {
@@ -199,8 +199,8 @@ pub fn get(mut pageTraitSharedPtr: PageTraitSharedPtr, key: &H2RustType) -> H2Ru
 }
 
 impl PageTrait for Page {
-    fn init_memory_account(&mut self, memory_count: Integer) {
-        if !h2_rust_cell_call!(self.mv_map, is_persistent) {
+    fn initMemoryCount(&mut self, memory_count: Integer) {
+        if !get_ref!(self.mv_map).is_persistent() {
             self.memory = IN_MEMORY;
         } else if memory_count == 0 {
             self.recalculate_memory();
@@ -210,7 +210,7 @@ impl PageTrait for Page {
         }
     }
 
-    fn binary_search(&mut self, key: &H2RustType) -> Integer {
+    fn binarySearch(&mut self, key: &H2RustType) -> Integer {
         let mv_map = get_ref!(self.mv_map);
         let keyType = mv_map.getKeyType();
         let res = keyType.binary_search(key, &self.keys, self.getKeyCount(), self.cached_compare);
@@ -383,12 +383,12 @@ impl Leaf {
 }
 
 impl PageTrait for Leaf {
-    fn init_memory_account(&mut self, memory_count: Integer) {
-        get_ref_mut!(self.page).init_memory_account(memory_count);
+    fn initMemoryCount(&mut self, memory_count: Integer) {
+        get_ref_mut!(self.page).initMemoryCount(memory_count);
     }
 
-    fn binary_search(&mut self, key: &H2RustType) -> Integer {
-        get_ref_mut!(self.page).binary_search(key)
+    fn binarySearch(&mut self, key: &H2RustType) -> Integer {
+        get_ref_mut!(self.page).binarySearch(key)
     }
 
     fn getKeyCount(&self) -> Integer {
@@ -489,12 +489,12 @@ impl NonLeaf {
 }
 
 impl PageTrait for NonLeaf {
-    fn init_memory_account(&mut self, memory_count: Integer) {
-        get_ref_mut!(self.page).init_memory_account(memory_count);
+    fn initMemoryCount(&mut self, memory_count: Integer) {
+        get_ref_mut!(self.page).initMemoryCount(memory_count);
     }
 
-    fn binary_search(&mut self, key: &H2RustType) -> Integer {
-        get_ref_mut!(self.page).binary_search(key)
+    fn binarySearch(&mut self, key: &H2RustType) -> Integer {
+        get_ref_mut!(self.page).binarySearch(key)
     }
 
     fn getKeyCount(&self) -> Integer {

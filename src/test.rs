@@ -95,8 +95,8 @@ use crossbeam::atomic::AtomicCell;
 use parking_lot::RwLockWriteGuard;
 use usync::lock_api::RawMutex;
 use usync::ReentrantMutex;
-use crate::h2_rust_cell_mut_call;
-use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable};
+use crate::{get_ref_mut};
+use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable, Optional};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
@@ -634,7 +634,7 @@ fn test_overlapping() {
     impl Shower for User {
         fn show(&mut self) {
             if self.belonging_company.is_some() {
-                h2_rust_cell_mut_call!(self.belonging_company,show);
+                get_ref_mut!(self.belonging_company).show();
             }
             println!("{}", "user show")
         }
@@ -744,7 +744,7 @@ fn test_cast() {
     let a = Arc::new(User::default());//as Arc<dyn Any>;
 
 
-    let object = Arc::new(H2RustCell::new(Container(a))) as Arc<H2RustCell<dyn ContainerTrait<Arc<User>>>>;
+    // let object = Arc::new(H2RustCell::new(Container(a))) as Arc<H2RustCell<dyn ContainerTrait<Arc<User>>>>;
 
     fn cast<T>(object: Arc<H2RustCell<dyn ContainerTrait<Arc<dyn Any>>>>) {
         let a = object.get_ref();

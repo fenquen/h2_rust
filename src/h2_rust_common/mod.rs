@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Weak;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -136,5 +137,62 @@ pub trait Optional {
 impl<T> Optional for Option<T> {
     fn is_some(&self) -> bool {
         self.is_some()
+    }
+}
+
+pub trait Downgrade7<O, R> {
+    type WeakAllType: Upgrade<O> + IntoWeak<R>;
+
+    fn downgrade7(&self) -> Self::WeakAllType;
+}
+
+impl<O, T: ?Sized, R> Downgrade7<O, R> for Option<Arc<T>> where Option<Arc<T>>: IntoOriginal<O>,
+                                                                Option<Weak<T>>: IntoWeak<R> { // 下边的这个原因是 WeakAllType 需要满足 IntoWeak<R>
+    type WeakAllType = Option<Weak<T>>;
+
+    fn downgrade7(&self) -> Self::WeakAllType {
+        if self.is_none() {
+            None
+        } else {
+            Some(Arc::downgrade(self.as_ref().unwrap()))
+        }
+    }
+}
+
+pub trait Upgrade<O> {
+    type ArcAllType: IntoOriginal<O>;
+
+    fn upgrade(&self) -> Self::ArcAllType;
+}
+
+impl<O, T: ?Sized> Upgrade<O> for Option<Weak<T>> where Option<Arc<T>>: IntoOriginal<O> { // 原因 ArcAllType 需要满足 IntoOriginal<O>
+    type ArcAllType = Option<Arc<T>>;
+
+    fn upgrade(&self) -> Self::ArcAllType {
+        if self.is_none() {
+            None
+        } else {
+            self.as_ref().unwrap().upgrade()
+        }
+    }
+}
+
+pub trait IntoWeak<T>: Sized {
+    fn intoWeak(self) -> T;
+}
+
+impl<T: ?Sized> IntoWeak<Option<Weak<T>>> for Option<Weak<T>> {
+    fn intoWeak(self) -> Option<Weak<T>> {
+        self
+    }
+}
+
+pub trait IntoOriginal<T>: Sized {
+    fn intoOriginal(self) -> T;
+}
+
+impl<T: ?Sized> IntoOriginal<Option<Arc<T>>> for Option<Arc<T>> {
+    fn intoOriginal(self) -> Option<Arc<T>> {
+        self
     }
 }

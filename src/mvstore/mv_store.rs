@@ -14,20 +14,19 @@ use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyL
 use crate::mvstore::{chunk, data_utils, page};
 use crate::mvstore::file_store::{FileStore, FileStoreRef};
 use crate::mvstore::mv_map::{MVMap, MVMapSharedPtr};
-use crate::mvstore::page::{Page, PageTraitSharedPtr};
+use crate::mvstore::page::{Page, PageTrait, PageTraitSharedPtr};
 use crate::mvstore::r#type::string_data_type;
-use crate::{h2_rust_cell_call,
-            atomic_ref_cell,
-            atomic_ref_cell_mut,
-            h2_rust_cell_mut_call,
-            get_ref_mut,
-            build_option_arc_h2RustCell,
-            get_ref,
-            throw,
-            build_arc_h2RustCell};
+use crate::{
+    atomic_ref_cell,
+    atomic_ref_cell_mut,
+    get_ref_mut,
+    build_option_arc_h2RustCell,
+    get_ref,
+    throw,
+    build_arc_h2RustCell};
 use crate::api::error_code;
 use crate::db::store;
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr, WeakPtr};
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::message::db_error;
 use crate::message::db_error::DbError;
@@ -71,8 +70,8 @@ pub struct MVStore {
     file_store_shall_be_closed: bool,
     file_store: FileStoreRef,
 
-    page_cache: Option<CacheLongKeyLIRS<PageTraitSharedPtr>>,
-    chunk_cache: Option<CacheLongKeyLIRS<Option<Arc<Vec<Long>>>>>,
+    pageCache: Option<CacheLongKeyLIRS<SharedPtr<dyn PageTrait>, WeakPtr<dyn PageTrait>>>,
+    chunkCache: Option<CacheLongKeyLIRS<SharedPtr<Vec<Long>>, WeakPtr<Vec<Long>>>>,
 
     pg_split_size: Integer,
 
@@ -149,15 +148,15 @@ impl MVStore {
             pgSplitSize = 16 * 1024;
         }
         if page_cache_config.is_some() {
-            mvStoreMutRef.page_cache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
+            mvStoreMutRef.pageCache = Some(CacheLongKeyLIRS::new(&page_cache_config.unwrap()));
         }
         if chunk_cache_config.is_some() {
-            mvStoreMutRef.chunk_cache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
+            mvStoreMutRef.chunkCache = Some(CacheLongKeyLIRS::new(&chunk_cache_config.unwrap()));
         }
 
         pgSplitSize = data_utils::get_config_int_param(config, "pageSplitSize", pgSplitSize);
-        if mvStoreMutRef.page_cache.is_some() {
-            let max_item_size = mvStoreMutRef.page_cache.as_ref().unwrap().get_max_item_size() as Integer;
+        if mvStoreMutRef.pageCache.is_some() {
+            let max_item_size = mvStoreMutRef.pageCache.as_ref().unwrap().get_max_item_size() as Integer;
             if pgSplitSize > max_item_size {
                 pgSplitSize = max_item_size;
             }
@@ -172,7 +171,7 @@ impl MVStore {
                                           string_data_type::INSTANCE.clone())?;
 
         if mvStoreMutRef.file_store.is_some() {
-            mvStoreMutRef.retention_time = h2_rust_cell_call!(mvStoreMutRef.file_store, get_default_retention_time);
+            mvStoreMutRef.retention_time = get_ref!(mvStoreMutRef.file_store).get_default_retention_time();
 
             // 19 KB memory is about 1 KB storage
             let mut kb = Integer::max(1, Integer::min(19, utils::scaleForAvailableMemory(64))) * 1024;
@@ -194,10 +193,10 @@ impl MVStore {
 
                     let file_name = file_name.unwrap();
                     let encryption_key = h2_rust_utils::cast::<Vec<Byte>>(encryption_key);
-                    h2_rust_cell_mut_call!(mvStoreMutRef.file_store, open, &file_name, read_only, encryption_key)?;
+                    get_ref_mut!(mvStoreMutRef.file_store).open(&file_name, read_only, encryption_key)?;
                 }
 
-                if h2_rust_cell_call!(mvStoreMutRef.file_store, size) == 0 {
+                if get_ref!(mvStoreMutRef.file_store).size() == 0 {
                     mvStoreMutRef.creation_time = h2_rust_utils::getTimestamp();
 
                     mvStoreMutRef.store_header.insert(HDR_H.to_string(), Box::new(2));
@@ -269,14 +268,14 @@ impl MVStore {
     }
 
     fn read_page_from_cache(&mut self, position: Long) -> PageTraitSharedPtr {
-        if self.page_cache.is_none() {
+        if self.pageCache.is_none() {
             None
         } else {
-            self.page_cache.as_mut().unwrap().get(position)
+            self.pageCache.as_mut().unwrap().get(position)
         }
     }
 
-    fn get_chunk(&mut self, position: Long) -> Result<ChunkSharedPtr> {
+    fn get_chunk(&mut self, position: Long) -> Result<SharedPtr<Chunk>> {
         let chunk_id = data_utils::getPageChunkId(position);
 
         let pair = self.chunkId_chunk.get(&chunk_id);
@@ -316,13 +315,11 @@ impl MVStore {
     }
 
     fn cachePage(&mut self, pageTrait: PageTraitSharedPtr) {
-        if self.page_cache.is_some() {
+        if self.pageCache.is_some() {
             let position = get_ref!(pageTrait).getPosition();
             let memory = get_ref!(pageTrait).getMemory();
 
-            self.page_cache.as_mut().unwrap().put(position,
-                                                  pageTrait,
-                                                  memory);
+            self.pageCache.as_mut().unwrap().put(position, pageTrait, memory);
         }
     }
 }

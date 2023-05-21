@@ -10,4 +10,5 @@ pub const DOT: &str = ".";
 pub const GB: Integer = 1024 * 1024 * 1024;
 
 pub const COLON_CHAR: char = ':';
+
 pub const COMMA_CHAR: char = ',';
