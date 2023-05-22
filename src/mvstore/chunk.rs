@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use bit_set::BitSet;
 use crate::api::error_code;
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::{Byte, byte_buffer, h2_rust_constant, Integer, Long, UInteger};
 use crate::message::db_error::DbError;
 use crate::mvstore::{chunk, data_utils, mv_store};
@@ -45,8 +45,6 @@ const ATTR_TOC: &str = "toc";
 const ATTR_OCCUPANCY: &str = "occupancy";
 const ATTR_FLETCHER: &str = "fletcher";
 
-pub type ChunkSharedPtr = Option<Arc<H2RustCell<Chunk>>>;
-
 #[derive(Default)]
 pub struct Chunk {
     pub id: Integer,
@@ -71,11 +69,11 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(s: &String) -> Result<ChunkSharedPtr> {
+    pub fn new(s: &String) -> Result<SharedPtr<Chunk>> {
         Self::new2(data_utils::parseMap(s)?, true)
     }
 
-    fn new2(map: HashMap<String, String>, full: bool) -> Result<ChunkSharedPtr> {
+    fn new2(map: HashMap<String, String>, full: bool) -> Result<SharedPtr<Chunk>> {
         let chunk_id: Integer = data_utils::readHexIntOrLong(&map, ATTR_CHUNK, 0)?;
         if 0 >= chunk_id {
             throw!(DbError::get(error_code::FILE_CORRUPTED_1,vec![&format!("invalid chunk id {}",chunk_id)]));
@@ -166,7 +164,7 @@ pub fn get_meta_key(chunk_id: Integer) -> String {
 }
 
 /// Build a block from the given string.
-pub fn fromString(s: &String) -> Result<ChunkSharedPtr> {
+pub fn fromString(s: &String) -> Result<SharedPtr<Chunk>> {
     Chunk::new(s)
 }
 

@@ -127,30 +127,30 @@ impl<'a, T: ?Sized + 'a> Drop for MyMutexGuard<'a, T> {
 }
 
 pub trait Optional {
-    fn is_none(&self) -> bool {
-        !self.is_some()
+    fn isNone(&self) -> bool {
+        !self.isSome()
     }
 
-    fn is_some(&self) -> bool;
+    fn isSome(&self) -> bool;
 }
 
 impl<T> Optional for Option<T> {
-    fn is_some(&self) -> bool {
+    fn isSome(&self) -> bool {
         self.is_some()
     }
 }
 
-pub trait Downgrade7<O, R> {
+pub trait Downgrade<O, R> {
     type WeakAllType: Upgrade<O> + IntoWeak<R>;
 
-    fn downgrade7(&self) -> Self::WeakAllType;
+    fn downgrade(&self) -> Self::WeakAllType;
 }
 
-impl<O, T: ?Sized, R> Downgrade7<O, R> for Option<Arc<T>> where Option<Arc<T>>: IntoOriginal<O>,
-                                                                Option<Weak<T>>: IntoWeak<R> { // 下边的这个原因是 WeakAllType 需要满足 IntoWeak<R>
+impl<O, T: ?Sized, R> Downgrade<O, R> for Option<Arc<T>> where Option<Arc<T>>: IntoOriginal<O>,
+                                                               Option<Weak<T>>: IntoWeak<R> { // 下边的这个原因是 WeakAllType 需要满足 IntoWeak<R>
     type WeakAllType = Option<Weak<T>>;
 
-    fn downgrade7(&self) -> Self::WeakAllType {
+    fn downgrade(&self) -> Self::WeakAllType {
         if self.is_none() {
             None
         } else {

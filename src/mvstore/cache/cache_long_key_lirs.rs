@@ -6,7 +6,7 @@ use usync::lock_api::RawMutex;
 use usync::ReentrantMutex;
 use crate::{build_option_arc_h2RustCell, db_error_template, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_minus_minus, suffix_plus_plus, throw, unsigned_right_shift};
 use crate::api::error_code;
-use crate::h2_rust_common::{Downgrade7, Integer, IntoOriginal, IntoWeak, Long, MyMutex, Nullable, Optional, ULong, Upgrade};
+use crate::h2_rust_common::{Downgrade, Integer, IntoOriginal, IntoWeak, Long, MyMutex, Nullable, Optional, ULong, Upgrade};
 use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
@@ -28,7 +28,7 @@ pub struct CacheLongKeyLIRS<V, R> {
     non_resident_queue_size_high: Integer,
 }
 
-impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> CacheLongKeyLIRS<V, R> {
+impl<V: Default + Clone + Optional + Downgrade<V, R>, R: Default + Clone + Optional + Upgrade<V>> CacheLongKeyLIRS<V, R> {
     pub fn new(config: &CacheLongKeyLIRSConfig) -> CacheLongKeyLIRS<V, R> {
         let mut cache_long_key_lirs = CacheLongKeyLIRS::default();
         cache_long_key_lirs.init(config);
@@ -85,7 +85,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
     }
 
     pub fn put(&mut self, key: Long, value: V, memory: Integer) -> Result<()> {
-        if value.is_none() {
+        if value.isNone() {
             throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["The value may not be null"]));
         }
 
@@ -219,7 +219,7 @@ pub struct Segment<V, R> {
     hitCount: Integer,
 }
 
-impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> Segment<V, R> {
+impl<V: Default + Clone + Optional + Downgrade<V, R>, R: Default + Clone + Optional + Upgrade<V>> Segment<V, R> {
     pub fn default1() -> Segment<V, R> {
         let mut segment: Segment<V, R> = Default::default();
         segment.reentrantMutexPtr = build_option_arc_h2RustCell!(ReentrantMutex::<()>::default());
@@ -346,7 +346,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
         };
 
         // the entry was not found, or it was a non-resident entry
-        if value.is_none() {
+        if value.isNone() {
             suffix_plus_plus!(self.missCount);
         } else {
             self.access(entry_ref);
@@ -375,13 +375,13 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
             }
         } else { // queue体系动手
             let value = entry.getValue();
-            if value.is_none() {
+            if value.isNone() {
                 return;
             }
 
             self.removeFromQueue(entry_ref.clone());
 
-            if entry.weakReference.is_some() {
+            if entry.weakReference.isSome() {
                 entry.value = value;
                 entry.weakReference = Default::default();
                 self.usedMemory += entry.memory as Long;
@@ -418,7 +418,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
         let existed = entry.is_none();
 
         let mut old: V = Default::default();
-        assert!(old.is_none());
+        assert!(old.isNone());
 
         if existed {
             old = get_ref!(entry).getValue();
@@ -441,6 +441,12 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
         if self.usedMemory > self.maxMemory {
             // old entries needs to be removed
             self.evict();
+
+            // if the cache is full, the new entry is cold if possible
+            if self.stackSize > 0 {
+                // the new cold entry is at the top of the queue
+                self.addToQueue(self.queue.clone(), entry.clone());
+            }
         }
 
         old
@@ -531,7 +537,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
 
             self.removeFromQueue(entrySharedPtr.clone());
 
-            get_ref_mut!(entrySharedPtr).weakReference = get_ref!(entrySharedPtr).value.downgrade7().intoWeak();
+            get_ref_mut!(entrySharedPtr).weakReference = get_ref!(entrySharedPtr).value.downgrade().intoWeak();
             get_ref_mut!(entrySharedPtr).value = V::default();
 
             self.addToQueue(self.queue2.clone(), entrySharedPtr);
@@ -551,7 +557,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
             let entry = get_ref!(self.queue2).queuePrev.clone();
             if self.queue2Size <= maxQueue2SizeHigh {
                 let weakReference = get_ref!(entry).weakReference.clone();
-                if weakReference.is_some()  && weakReference.upgrade().intoOriginal().is_some() {
+                if weakReference.isSome() && weakReference.upgrade().intoOriginal().isSome() {
                     break;  // stop trimming if entry holds a value
                 }
             }
@@ -619,7 +625,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
         entry.queuePrev = None;
         entry.queueNext = None;
 
-        if entry.value.is_some() {
+        if entry.value.isSome() {
             self.queueSize = self.queueSize - 1;
         } else {
             self.queue2Size = self.queue2Size - 1;
@@ -652,7 +658,7 @@ impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optio
         get_ref_mut!(entry.queueNext).queuePrev = entry_ref.clone();
         get_ref_mut!(queue).queueNext = entry_ref.clone();
 
-        if entry.value.is_some() {
+        if entry.value.isSome() {
             suffix_plus_plus!(self.queueSize);
         } else {
             suffix_plus_plus!(self.queue2Size);
@@ -722,7 +728,7 @@ pub struct Entry<V, R> {
     mapNext: SharedPtr<Entry<V, R>>,
 }
 
-impl<V: Default + Clone + Optional + Downgrade7<V,R>, R: Default + Clone + Optional + Upgrade<V>> Entry<V, R> {
+impl<V: Default + Clone + Optional + Downgrade<V, R>, R: Default + Clone + Optional + Upgrade<V>> Entry<V, R> {
     pub fn new0() -> SharedPtr<Entry<V, R>> {
         build_option_arc_h2RustCell!(Entry::default())
     }

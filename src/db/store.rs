@@ -6,21 +6,20 @@ use crate::engine::database::{Database, DatabaseRef};
 use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut};
 use crate::api::error_code;
 use crate::h2_rust_common::{Integer, Nullable, VecRef};
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::Nullable::NotNull;
-use crate::mvstore::mv_store::{MVStoreBuilder, MVStoreRef};
+use crate::mvstore::mv_store::{MVStore, MVStoreBuilder};
 use crate::mvstore::{data_utils, mv_store_tool};
 use crate::store::fs::file_utils;
 
 #[derive(Default)]
 pub struct Store {
-    mv_file_path: String,
+    mvFilePath: String,
     encrypted: bool,
-    mv_store: MVStoreRef,
+    mv_store: SharedPtr<MVStore>,
 }
 
 pub type StoreRef = Option<Arc<H2RustCell<Store>>>;
-
 
 impl Store {
     pub fn new(database_ref: DatabaseRef, encryption_key: VecRef<u8>) -> Result<StoreRef> {
@@ -41,8 +40,8 @@ impl Store {
         let mut encrypted = false;
 
         if !database_path.is_empty() {
-            this.mv_file_path = database_path.add(constant::SUFFIX_MV_FILE);
-            let mv_file_path = &this.mv_file_path;
+            this.mvFilePath = database_path.add(constant::SUFFIX_MV_FILE);
+            let mv_file_path = &this.mvFilePath;
 
             mv_store_tool::compact_clean_up(mv_file_path)?;
             mv_store_builder.file_name(mv_file_path);

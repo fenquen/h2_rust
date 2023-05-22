@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use crate::build_option_arc_h2RustCell;
 use crate::h2_rust_common::{Byte, Long};
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
-use crate::mvstore::page::PageTraitSharedPtr;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
+use crate::mvstore::page::{PageTrait};
 
 pub type RootReferenceRef = Option<Arc<H2RustCell<RootReference>>>;
 
 pub struct RootReference {
     /// The root page.
-    pub root: PageTraitSharedPtr,
+    pub root: SharedPtr<dyn PageTrait>,
 
     /// The version used for writing.
     pub version: Long,
@@ -37,7 +37,7 @@ pub struct RootReference {
 
 impl RootReference {
     /// This one is used to set root initially and for r/o snapshots
-    pub fn new(root: PageTraitSharedPtr, version: Long) -> RootReferenceRef {
+    pub fn new(root: SharedPtr<dyn PageTrait>, version: Long) -> RootReferenceRef {
         let root_reference = RootReference {
             root,
             version,

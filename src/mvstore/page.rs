@@ -8,14 +8,14 @@ use lazy_static::lazy_static;
 use crate::engine::constant;
 use crate::{get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template};
 use crate::api::error_code;
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::h2_rust_type::H2RustType;
 use crate::h2_rust_common::h2_rust_type::H2RustType::Null;
 use crate::h2_rust_common::{Integer, Long, Short};
 use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::message::db_error::DbError;
 use crate::mvstore::data_utils;
-use crate::mvstore::mv_map::MVMapSharedPtr;
+use crate::mvstore::mv_map::{MVMap};
 
 /// The estimated number of bytes used per child entry.
 const PAGE_MEMORY_CHILD: Integer = constant::MEMORY_POINTER + 16; //  16 = two longs
@@ -39,10 +39,6 @@ const PAGE_LEAF_MEMORY: Integer = PAGE_MEMORY +  // super
 
 const IN_MEMORY: Integer = Integer::MIN;
 
-pub type PageTraitSharedPtr = Option<Arc<H2RustCell<dyn PageTrait>>>;
-
-type PageRef = Option<Arc<H2RustCell<Page>>>;
-
 pub trait PageTrait {
     /// 父类实现
     fn initMemoryCount(&mut self, memory_count: Integer);
@@ -65,7 +61,7 @@ pub trait PageTrait {
     fn getValue(&self, index: Integer) -> H2RustType;
 
     /// abstract
-    fn getChildPage(&self, index: Integer) -> PageTraitSharedPtr;
+    fn getChildPage(&self, index: Integer) -> SharedPtr<dyn PageTrait>;
 
     /// Get the total number of key-value pairs, including child pages.
     fn getTotalCount(&self) -> Long;
@@ -77,7 +73,7 @@ pub trait PageTrait {
     fn setPosition(&self, position: Long);
 
     /// 父类实现
-    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()>;
+    fn readFromByteBuffer(&mut self, actual: SharedPtr<dyn PageTrait>, byteBuffer: &mut ByteBuffer) -> Result<()>;
 
     /// 父类实现
     fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType>;
@@ -93,13 +89,24 @@ pub trait PageTrait {
 
     /// 父类实现
     fn getMemory(&self) -> Integer;
+
+    /// 父类实现
+    fn getMvMap(&self) -> SharedPtr<MVMap>;
+
+    /// abstract
+    fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait>;
+
+    /// 专用于leaf
+    fn getValues(&self) -> SharedPtr<Vec<H2RustType>> {
+        unimplemented!("专用的给leaf")
+    }
 }
 
 pub type PageSharedPtr = Option<Arc<H2RustCell<Page>>>;
 
 #[derive(Default)]
 pub struct Page {
-    pub mv_map: MVMapSharedPtr,
+    pub mv_map: SharedPtr<MVMap>,
 
     /// The estimated memory used in persistent case, IN_MEMORY marker value otherwise.
     pub memory: Integer,
@@ -125,39 +132,39 @@ impl Page {
         Some(Arc::new(H2RustCell::new(page)))
     }
 
-    pub fn create_empty_leaf(mv_map_ref: MVMapSharedPtr) -> PageTraitSharedPtr {
+    pub fn createEmptyLeaf(mv_map_ref: SharedPtr<MVMap>) -> SharedPtr<dyn PageTrait> {
         let mv_map = get_ref!(mv_map_ref);
 
-        let keys = mv_map.key_type.as_ref().unwrap().create_storage(0);
-        let values = mv_map.value_type.as_ref().unwrap().create_storage(0);
+        let keys = mv_map.keyType.as_ref().unwrap().create_storage(0);
+        let values = mv_map.valueType.as_ref().unwrap().create_storage(0);
 
         //drop(mv_map_atomic_ref);
 
-        Self::create_leaf(mv_map_ref,
-                          keys,
-                          values,
-                          PAGE_LEAF_MEMORY)
+        Self::createLeaf(mv_map_ref,
+                         keys,
+                         build_option_arc_h2RustCell!(values),
+                         PAGE_LEAF_MEMORY)
     }
 
-    pub fn create_leaf(mv_map_ref: MVMapSharedPtr,
-                       keys: Vec<H2RustType>,
-                       values: Vec<H2RustType>,
-                       memory: Integer) -> PageTraitSharedPtr {
+    pub fn createLeaf(mv_map_ref: SharedPtr<MVMap>,
+                      keys: Vec<H2RustType>,
+                      values: SharedPtr<Vec<H2RustType>>,
+                      memory: Integer) -> SharedPtr<dyn PageTrait> {
         assert!(mv_map_ref.is_some());
 
-        let mut leaf = Leaf::new(mv_map_ref, keys, values);
+        let mut leaf = Leaf::new3(mv_map_ref, keys, values);
         leaf.initMemoryCount(memory);
         let page_trait_ref = Arc::new(H2RustCell::new(leaf)) as Arc<H2RustCell<dyn PageTrait>>;
         Some(page_trait_ref)
     }
 
 
-    fn recalculate_memory(&mut self) {
+    fn recalculateMemory(&mut self) {
         assert!(self.is_persistent());
-        self.memory = self.calculate_memory();
+        self.memory = self.calculateMemory();
     }
 
-    fn calculate_memory(&self) -> Integer {
+    fn calculateMemory(&self) -> Integer {
         // todo mvMap.evaluateMemoryForKeys(keys, getKeyCount());
         1
     }
@@ -177,7 +184,7 @@ impl Page {
     }
 }
 
-pub fn get(mut pageTraitSharedPtr: PageTraitSharedPtr, key: &H2RustType) -> H2RustType {
+pub fn get(mut pageTraitSharedPtr: SharedPtr<dyn PageTrait>, key: &H2RustType) -> H2RustType {
     loop {
         let pageTraitMutRef = get_ref_mut!(pageTraitSharedPtr);
         let mut index = pageTraitMutRef.binarySearch(key);
@@ -203,7 +210,7 @@ impl PageTrait for Page {
         if !get_ref!(self.mv_map).is_persistent() {
             self.memory = IN_MEMORY;
         } else if memory_count == 0 {
-            self.recalculate_memory();
+            self.recalculateMemory();
         } else {
             self.add_memory(memory_count);
             assert_eq!(memory_count, self.get_memory());
@@ -234,7 +241,7 @@ impl PageTrait for Page {
         unimplemented!("abstract 需要由子类实现")
     }
 
-    fn getChildPage(&self, index: Integer) -> PageTraitSharedPtr {
+    fn getChildPage(&self, index: Integer) -> SharedPtr<dyn PageTrait> {
         unimplemented!("abstract 需要由子类实现")
     }
 
@@ -250,7 +257,7 @@ impl PageTrait for Page {
         self.position.store(position, Ordering::Release);
     }
 
-    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
+    fn readFromByteBuffer(&mut self, actual: SharedPtr<dyn PageTrait>, byteBuffer: &mut ByteBuffer) -> Result<()> {
         let chunkId = data_utils::getPageChunkId(self.position.load(Ordering::Acquire));
         let offset = data_utils::getPageOffset(self.position.load(Ordering::Acquire));
 
@@ -309,7 +316,7 @@ impl PageTrait for Page {
 
         self.diskSpaceUsed = pageLength;
 
-        self.recalculate_memory();
+        self.recalculateMemory();
 
         Ok(())
     }
@@ -339,20 +346,46 @@ impl PageTrait for Page {
             0
         }
     }
-}
 
-pub type LeafRef = Option<Arc<H2RustCell<Leaf>>>;
+    fn getMvMap(&self) -> SharedPtr<MVMap> {
+        self.mv_map.clone()
+    }
+
+    fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait> {
+        unimplemented!("abstract 需要由子类实现")
+    }
+}
 
 #[derive(Default)]
 pub struct Leaf {
-    page: PageRef,
-    values: Vec<H2RustType>,
+    page: SharedPtr<Page>,
+    values: SharedPtr<Vec<H2RustType>>,
 }
 
 impl Leaf {
-    pub fn new(mv_map_ref: MVMapSharedPtr,
-               keys: Vec<H2RustType>,
-               values: Vec<H2RustType>) -> Leaf {
+    pub fn new1(mvMapSharedPtr: SharedPtr<MVMap>) -> Leaf {
+        let pageRef = build_option_arc_h2RustCell!(Page::default());
+
+        {
+            let pageMutRef = pageRef.as_ref().unwrap().get_ref_mut();
+            pageMutRef.mv_map = mvMapSharedPtr;
+        }
+
+        let mut leaf = Leaf::default();
+        leaf.page = pageRef;
+
+        leaf
+    }
+
+    pub fn new2(mvMapSharedPtr: SharedPtr<MVMap>, source: SharedPtr<dyn PageTrait>) -> Leaf {
+        let mut leaf = Self::new1(mvMapSharedPtr);
+        leaf.values = get_ref!(source).getValues();
+        leaf
+    }
+
+    pub fn new3(mv_map_ref: SharedPtr<MVMap>,
+                keys: Vec<H2RustType>,
+                values: SharedPtr<Vec<H2RustType>>) -> Leaf {
         let page_ref = Page::new();
 
         {
@@ -365,20 +398,6 @@ impl Leaf {
             page: page_ref,
             values,
         }
-    }
-
-    pub fn new1(mvMapSharedPtr: MVMapSharedPtr) -> Leaf {
-        let pageRef = build_option_arc_h2RustCell!(Page::default());
-
-        {
-            let pageMutRef = pageRef.as_ref().unwrap().get_ref_mut();
-            pageMutRef.mv_map = mvMapSharedPtr;
-        }
-
-        let mut leaf = Leaf::default();
-        leaf.page = pageRef;
-
-        leaf
     }
 }
 
@@ -400,13 +419,13 @@ impl PageTrait for Leaf {
     }
 
     fn getValue(&self, index: Integer) -> H2RustType {
-        match self.values.get(index as usize) {
+        match get_ref!(self.values).get(index as usize) {
             Some(h2RustType) => h2RustType.clone(),
             None => Null
         }
     }
 
-    fn getChildPage(&self, index: Integer) -> PageTraitSharedPtr {
+    fn getChildPage(&self, index: Integer) -> SharedPtr<dyn PageTrait> {
         unimplemented!("leaf not support")
     }
 
@@ -422,7 +441,7 @@ impl PageTrait for Leaf {
         get_ref!(self.page).setPosition(position);
     }
 
-    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
+    fn readFromByteBuffer(&mut self, actual: SharedPtr<dyn PageTrait>, byteBuffer: &mut ByteBuffer) -> Result<()> {
         get_ref_mut!(self.page).readFromByteBuffer(actual, byteBuffer)
     }
 
@@ -436,11 +455,11 @@ impl PageTrait for Leaf {
 
     fn readPayLoad(&mut self, byteBuffer: &mut ByteBuffer) {
         let keyCount = self.getKeyCount();
-        self.values = self.createValueStorage(keyCount);
+        self.values = build_option_arc_h2RustCell!(self.createValueStorage(keyCount));
 
         let page = get_ref!(self.page);
 
-        get_ref!(page.mv_map).getValueType().read_3(byteBuffer, &mut self.values, keyCount);
+        get_ref!(page.mv_map).getValueType().read_3(byteBuffer, get_ref_mut!(self.values), keyCount);
     }
 
     fn is_persistent(&self) -> bool {
@@ -450,11 +469,23 @@ impl PageTrait for Leaf {
     fn getMemory(&self) -> Integer {
         get_ref!(self.page).getMemory()
     }
+
+    fn getMvMap(&self) -> SharedPtr<MVMap> {
+        get_ref!(self.page).getMvMap()
+    }
+
+    fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait> {
+        build_option_arc_h2RustCell!(Self::new2(mvMap, actual))
+    }
+
+    fn getValues(&self) -> SharedPtr<Vec<H2RustType>> {
+        self.values.clone()
+    }
 }
 
 #[derive(Default)]
 pub struct NonLeaf {
-    page: PageRef,
+    page: SharedPtr<Page>,
 
     /// The child page references.
     children: Vec<PageReferenceSharedPtr>,
@@ -464,7 +495,7 @@ pub struct NonLeaf {
 }
 
 impl NonLeaf {
-    pub fn new1(mvMapSharedPtr: MVMapSharedPtr) -> NonLeaf {
+    pub fn new1(mvMapSharedPtr: SharedPtr<MVMap>) -> NonLeaf {
         let pageRef = Page::new();
 
         {
@@ -509,7 +540,7 @@ impl PageTrait for NonLeaf {
         unimplemented!("non leaf not support")
     }
 
-    fn getChildPage(&self, index: Integer) -> PageTraitSharedPtr {
+    fn getChildPage(&self, index: Integer) -> SharedPtr<dyn PageTrait> {
         let pageReferenceRef = get_ref!(self.children.get(index as usize).unwrap());
         let mut pageTraitSharedPtr = pageReferenceRef.page.clone();
 
@@ -517,7 +548,7 @@ impl PageTrait for NonLeaf {
             let pageRef = get_ref!(self.page);
             let mvMapRef = get_ref!(pageRef.mv_map);
 
-            pageTraitSharedPtr = mvMapRef.read_page(pageRef.mv_map.clone(), pageReferenceRef.position).unwrap();
+            pageTraitSharedPtr = mvMapRef.readPage(pageRef.mv_map.clone(), pageReferenceRef.position).unwrap();
             assert_eq!(pageReferenceRef.position, get_ref!(pageTraitSharedPtr).getPosition());
             assert_eq!(pageReferenceRef.count, get_ref!(pageTraitSharedPtr).getTotalCount());
         }
@@ -539,7 +570,7 @@ impl PageTrait for NonLeaf {
         get_ref!(self.page).setPosition(position);
     }
 
-    fn readFromByteBuffer(&mut self, actual: PageTraitSharedPtr, byteBuffer: &mut ByteBuffer) -> Result<()> {
+    fn readFromByteBuffer(&mut self, actual: SharedPtr<dyn PageTrait>, byteBuffer: &mut ByteBuffer) -> Result<()> {
         get_ref_mut!(self.page).readFromByteBuffer(actual, byteBuffer)
     }
 
@@ -591,6 +622,14 @@ impl PageTrait for NonLeaf {
     fn getMemory(&self) -> Integer {
         get_ref!(self.page).getMemory()
     }
+
+    fn getMvMap(&self) -> SharedPtr<MVMap> {
+        get_ref!(self.page).getMvMap()
+    }
+
+    fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait> {
+        todo!()
+    }
 }
 
 pub type PageReferenceSharedPtr = Option<Arc<H2RustCell<PageReference>>>;
@@ -606,14 +645,14 @@ pub struct PageReference {
     pub position: Long,
 
     /// The page, if in memory, or null.
-    pub page: PageTraitSharedPtr,
+    pub page: SharedPtr<dyn PageTrait>,
 
     /// The descendant count for this child page.
     count: Long,
 }
 
 impl PageReference {
-    pub fn new3(page: PageTraitSharedPtr, position: Long, count: Long) -> PageReferenceSharedPtr {
+    pub fn new3(page: SharedPtr<dyn PageTrait>, position: Long, count: Long) -> PageReferenceSharedPtr {
         build_option_arc_h2RustCell!(PageReference{
             page,
             position,
@@ -633,7 +672,7 @@ impl PageReference {
     }
 }
 
-pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: MVMapSharedPtr) -> Result<PageTraitSharedPtr> {
+pub fn readFromByteBuffer(byteBuffer: &mut ByteBuffer, position: Long, mvMap: SharedPtr<MVMap>) -> Result<SharedPtr<dyn PageTrait>> {
     let isLeaf = (data_utils::getPageType(position) & 1) == data_utils::PAGE_TYPE_LEAF;
 
     let pageTrait = if isLeaf {
