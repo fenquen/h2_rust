@@ -1,8 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use crate::h2_rust_common::{Byte, byte_buffer, Integer, Long, Nullable};
-use crate::h2_rust_common::Nullable::NotNull;
+use crate::h2_rust_common::{Byte, byte_buffer, Integer, Long};
 use std::{fs, i64};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek};
@@ -13,7 +12,7 @@ use std::path::Path;
 use crate::api::error_code;
 use crate::h2_rust_common::byte_buffer::ByteBuffer;
 use crate::h2_rust_common::file_lock::FileLock;
-use crate::h2_rust_common::h2_rust_cell::H2RustCell;
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::message::db_error::DbError;
 use crate::mvstore::data_utils;
 use crate::store::fs::file_utils;
@@ -39,10 +38,12 @@ pub struct FileStore {
     file_lock: Option<FileLock>,
 }
 
-pub type FileStoreRef = Option<Arc<H2RustCell<FileStore>>>;
-
 impl FileStore {
-    pub fn open(&mut self, file_name: &str, mut read_only: bool, encryption_key: Option<Box<Vec<Byte>>>) -> Result<()> {
+    pub fn open(&mut self,
+                file_name: &str,
+                mut read_only: bool,
+                encryption_key: Option<Box<Vec<Byte>>>) -> Result<()> {
+
         if self.file.is_some() {
             return Ok(());
         }
@@ -103,7 +104,7 @@ impl FileStore {
     }
 
 
-    pub fn new() -> Result<FileStoreRef> {
+    pub fn new() -> Result<SharedPtr<FileStore>> {
         Ok(Some(Arc::new(H2RustCell::new(FileStore::default()))))
     }
 

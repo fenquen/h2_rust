@@ -5,7 +5,7 @@ use crate::h2_rust_common::h2_rust_cell::H2RustCell;
 
 pub enum H2RustType {
     String(Arc<H2RustCell<String>>),
-    Integer(Arc<H2RustCell<Integer>>),
+    Integer(Integer),
     Null,
 }
 
@@ -31,6 +31,14 @@ impl H2RustType {
         match self {
             H2RustType::Null => true,
             _ => false
+        }
+    }
+
+    pub fn toString(&self) -> Option<String> {
+        match self {
+            H2RustType::String(a) => Some(a.get_ref().clone()),
+            H2RustType::Null => None,
+            _ => panic!("not H2RustType::String")
         }
     }
 }

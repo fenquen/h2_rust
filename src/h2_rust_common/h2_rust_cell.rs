@@ -97,6 +97,28 @@ macro_rules! get_ref_mut {
 }
 
 #[macro_export]
+macro_rules! weak_get_ref {
+    ($h2_rust_cell_option:ident) => {
+        $h2_rust_cell_option.as_ref().unwrap().upgrade().unwrap().get_ref()
+    };
+
+    ($h2_rust_cell_option:expr) => {
+        $h2_rust_cell_option.as_ref().unwrap().upgrade().unwrap().get_ref()
+    };
+}
+
+#[macro_export]
+macro_rules! weak_get_ref_mut {
+    ($h2_rust_cell_option:ident) => {
+        $h2_rust_cell_option.as_ref().unwrap().upgrade().unwrap().get_ref_mut()
+    };
+
+    ($h2_rust_cell_option:expr) => {
+        $h2_rust_cell_option.as_ref().unwrap().upgrade().unwrap().get_ref_mut()
+    };
+}
+
+#[macro_export]
 macro_rules! build_option_arc_h2RustCell {
     ($ident:ident) => {
         Some(Arc::new(H2RustCell::new($ident)))

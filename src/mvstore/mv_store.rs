@@ -3,16 +3,15 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex, Weak};
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering};
 use std::thread;
 use std::time::{Instant, SystemTime};
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
-use crate::h2_rust_common::{Byte, h2_rust_utils, Integer, Long, MyMutex, Nullable};
-use crate::h2_rust_common::Nullable::{NotNull, Null};
+use crate::h2_rust_common::{Byte, h2_rust_constant, h2_rust_utils, Integer, Long, MyMutex, Optional};
 use crate::mvstore::cache::cache_long_key_lirs::{CacheLongKeyLIRS, CacheLongKeyLIRSConfig};
-use crate::mvstore::{chunk, data_utils, page};
-use crate::mvstore::file_store::{FileStore, FileStoreRef};
+use crate::mvstore::{chunk, data_utils, mv_map, page};
+use crate::mvstore::file_store::{FileStore};
 use crate::mvstore::mv_map::{MVMap};
 use crate::mvstore::page::{Page, PageTrait};
 use crate::mvstore::r#type::string_data_type;
@@ -64,7 +63,7 @@ pub struct MVStore {
     recoveryMode: bool,
     compressionLevel: Integer,
     fileStoreShallBeClosed: bool,
-    fileStore: FileStoreRef,
+    fileStore: SharedPtr<FileStore>,
 
     pageCache: Option<CacheLongKeyLIRS<SharedPtr<dyn PageTrait>, WeakPtr<dyn PageTrait>>>,
     chunkCache: Option<CacheLongKeyLIRS<SharedPtr<Vec<Long>>, WeakPtr<Vec<Long>>>>,
@@ -77,7 +76,11 @@ pub struct MVStore {
     /// This is relatively fast changing part of metadata
     layout: SharedPtr<MVMap>,
 
-    currentVersion: AtomicI64,
+    /// The metadata map. Holds name -> id and id -> name and id -> metadata
+    /// mapping for all maps. This is relatively slow changing part of metadata
+    meta: SharedPtr<MVMap>,
+
+    pub currentVersion: AtomicI64,
 
     retentionTime: Integer,
 
@@ -99,11 +102,16 @@ pub struct MVStore {
     lastMapId: AtomicI32,
 
     state: AtomicI32,
+    oldestVersionToKeep: AtomicI64,
+    versionsToKeep: Integer,
+    metaChanged: AtomicBool,
 }
 
 impl MVStore {
     pub fn new(config: &mut HashMap<String, Box<dyn Any>>) -> Result<SharedPtr<MVStore>> {
-        let mv_store_ref = build_option_arc_h2RustCell!(MVStore::default());
+        let mut mvStore = MVStore::default();
+        mvStore.versionsToKeep = 5;
+        let mv_store_ref = build_option_arc_h2RustCell!(mvStore);
         Self::init(mv_store_ref.clone(), config)?;
 
         Ok(mv_store_ref)
@@ -161,7 +169,7 @@ impl MVStore {
         mvStoreMutRef.keysPerPage = data_utils::get_config_int_param(config, "keysPerPage", 48);
         //backgroundExceptionHandler = (UncaughtExceptionHandler) config.get("backgroundExceptionHandler");
 
-        mvStoreMutRef.layout = MVMap::new(Arc::downgrade(mvStoreSharedPtr.as_ref().unwrap()),
+        mvStoreMutRef.layout = MVMap::new(Some(Arc::downgrade(mvStoreSharedPtr.as_ref().unwrap())),
                                           0,
                                           string_data_type::INSTANCE.clone(),
                                           string_data_type::INSTANCE.clone())?;
@@ -230,9 +238,9 @@ impl MVStore {
         }
 
         self.lastMapId.store(map_id, Ordering::Release);
-        get_ref!(self.layout).setRootPosition(layout_root_pos,
-                                              self.currentVersion.load(Ordering::Acquire) - 1,
-                                              self.layout.clone());
+        get_ref_mut!(self.layout).setRootPosition(layout_root_pos,
+                                                  self.currentVersion.load(Ordering::Acquire) - 1,
+                                                  self.layout.clone());
     }
 
     fn last_chunk_version(&self) -> Long {
@@ -281,7 +289,7 @@ impl MVStore {
 
             let s = get_ref!(self.layout).get(&H2RustType::String(build_arc_h2RustCell!(chunk::get_meta_key(chunk_id))));
             if s.isNull() {
-                let error_code = store::data_utils_error_code_2_error_code(data_utils::ERROR_CHUNK_NOT_FOUND);
+                let error_code = store::dataUtilsErrorCode2ErrorCode(data_utils::ERROR_CHUNK_NOT_FOUND);
                 throw!(DbError::get(error_code,vec![&format!("Chunk {} not found",chunk_id)]));
             }
 
@@ -299,7 +307,7 @@ impl MVStore {
 
     fn check_open(&self) -> Result<()> {
         if !self.is_open_or_stopping() {
-            let error_code = store::data_utils_error_code_2_error_code(data_utils::ERROR_CLOSED);
+            let error_code = store::dataUtilsErrorCode2ErrorCode(data_utils::ERROR_CLOSED);
             throw!(DbError::get(error_code,vec![]));
         }
 
@@ -310,7 +318,7 @@ impl MVStore {
         self.state.load(Ordering::Acquire) <= STATE_STOPPING
     }
 
-    fn cachePage(&mut self, pageTrait: SharedPtr<dyn PageTrait>)->Result<()> {
+    fn cachePage(&mut self, pageTrait: SharedPtr<dyn PageTrait>) -> Result<()> {
         if self.pageCache.is_some() {
             let position = get_ref!(pageTrait).getPosition();
             let memory = get_ref!(pageTrait).getMemory();
@@ -319,6 +327,48 @@ impl MVStore {
         }
 
         Ok(())
+    }
+
+    pub fn getOldestVersionToKeep(&self) -> Long {
+        let mut v = self.oldestVersionToKeep.load(Ordering::Acquire);
+        v = Long::max(v - self.versionsToKeep as Long, INITIAL_VERSION);
+        if self.fileStore.is_some() {
+            let storeVersion = self.lastChunkVersion() - 1;
+            if storeVersion != INITIAL_VERSION && storeVersion < v {
+                v = storeVersion;
+            }
+        }
+        v
+    }
+
+    fn lastChunkVersion(&self) -> Long {
+        let chunk = unsafe { &*self.lastChunk.as_ptr() };
+        if chunk.is_none() {
+            INITIAL_VERSION + 1
+        } else {
+            get_ref!(chunk).version
+        }
+    }
+
+    pub fn deregisterMapRoot(&mut self, mapId: Integer) {
+        if get_ref!(self.layout).remove(H2RustType::String(build_arc_h2RustCell!(mv_map::getMapRootKey(mapId)))) != null {
+            self.markMetaChanged();
+        }
+    }
+
+    /// changes in the metadata alone are usually not detected, as the meta map is changed after storing
+    fn markMetaChanged(&mut self) {
+        self.metaChanged.store(true, Ordering::Release);
+    }
+
+    fn getMapName(&self, id: Integer) -> Result<Option<String>> {
+        // 元信息使用1个string表达
+        let h2RustType = get_ref!(self.meta).get(&H2RustType::String(build_arc_h2RustCell!(mv_map::getMapKey(id))));
+        if h2RustType.isNull() {
+            Ok(None)
+        } else {
+            data_utils::getMapName(&h2RustType.toString().unwrap())
+        }
     }
 }
 
@@ -332,7 +382,7 @@ impl MVStoreBuilder {
         MVStoreBuilder::default()
     }
 
-    pub fn file_name(&mut self, file_name: &str) {
+    pub fn fileName(&mut self, file_name: &str) {
         self.config.insert("fileName".to_string(), Box::new(file_name.to_string()));
     }
 

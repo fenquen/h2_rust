@@ -11,7 +11,7 @@ use crate::message::db_error::DbError;
 use crate::mvstore::{chunk, data_utils, mv_store};
 use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut, throw};
 use crate::h2_rust_common::byte_buffer::ByteBuffer;
-use crate::mvstore::file_store::{FileStore, FileStoreRef};
+use crate::mvstore::file_store::{FileStore};
 use crate::util::string_utils;
 
 /// The maximum chunk id.
@@ -122,7 +122,7 @@ impl Chunk {
         self.block.load(Ordering::Acquire) != Long::MAX
     }
 
-    pub fn readBufferForPage(&self, fileStore: FileStoreRef, offset: Integer, position: Long) -> Result<ByteBuffer> {
+    pub fn readBufferForPage(&self, fileStore: SharedPtr<FileStore>, offset: Integer, position: Long) -> Result<ByteBuffer> {
         loop {
             let originalBlock = self.block.load(Ordering::Acquire);
 

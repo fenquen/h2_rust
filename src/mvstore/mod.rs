@@ -12,3 +12,4 @@ pub mod root_reference;
 
 
 pub mod chunk;
+pub mod cursor_pos;

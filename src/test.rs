@@ -96,9 +96,8 @@ use parking_lot::RwLockWriteGuard;
 use usync::lock_api::RawMutex;
 use usync::ReentrantMutex;
 use crate::{get_ref_mut};
-use crate::h2_rust_common::{h2_rust_utils, Integer, Nullable, Optional};
+use crate::h2_rust_common::{h2_rust_utils, Integer, Optional};
 use crate::h2_rust_common::h2_rust_cell::H2RustCell;
-use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::data_utils;
 
 fn check<T: BorrowMut<[i32]>>(mut v: T) {
@@ -119,11 +118,6 @@ fn main() {
 #[derive(Default)]
 struct Company {
     pub level: i64,
-}
-
-struct User {
-    salary: u64,
-    company: Arc<Nullable<Company>>,
 }
 
 #[test]
@@ -174,27 +168,6 @@ fn test_crossbeam() {
     }).join().unwrap();
 
     println!("{}", unsafe { (*(a.as_ptr())).level })
-}
-
-#[test]
-fn test_atomic_refcell() {
-    fn change_a(this: Arc<AtomicRefCell<Nullable<Company>>>) {
-        let mut binding = (&*this).borrow_mut();
-        let company = binding.unwrap_mut();
-    }
-
-    let a = Arc::new(AtomicRefCell::new(NotNull(Company::default())));
-    let aa = a.clone();
-
-    let mut binding = (&*a).borrow_mut();
-    let company = binding.unwrap_mut();
-    company.level = 9;
-
-    drop(binding);
-    change_a(aa);
-    let mut binding = (&*a).borrow_mut();
-    let company = binding.unwrap_mut();
-    company.level = 19;
 }
 
 #[test]
@@ -255,36 +228,6 @@ fn test_abstract() {
     }
 
     type UsaGreeting = Greeting<UsaLocale>;
-}
-
-#[test]
-fn test_parameter_func() {
-    struct A<T: ?Sized> {
-        pub t: T,
-    }
-
-    struct B {
-        pub a: A<Arc<dyn Any>>,
-    }
-
-    impl B {
-        pub fn add(&mut self, a: A<Arc<dyn Any>>) {
-            self.a = a;
-        }
-
-        pub fn read<T: 'static>(&self) -> &T {
-            self.a.t.deref().downcast_ref::<T>().unwrap()
-        }
-    }
-
-    let a: A<Arc<dyn Any>> = A { t: Arc::new(1) };
-    let b = B { a };
-
-    let d = b.read::<Integer>();
-    println!("{}", d);
-
-    let a = Nullable::<Integer>::Null;
-    let a: Nullable<Integer> = a.clone();
 }
 
 #[test]

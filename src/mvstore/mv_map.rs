@@ -2,23 +2,24 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use std::sync::{Arc, Mutex, Weak};
-use std::sync::atomic::{AtomicI64, AtomicPtr};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicPtr, Ordering};
 use usync::RwLock;
-use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut, h2_rust_cell_equals};
-use crate::h2_rust_common::{Integer, Long, Nullable};
-use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
+use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut, h2_rust_cell_equals, suffix_plus_plus, throw, weak_get_ref, weak_get_ref_mut};
+use crate::api::error_code;
+use crate::h2_rust_common::{h2_rust_utils, Integer, Long, Nullable};
+use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr, WeakPtr};
 use crate::h2_rust_common::h2_rust_type::H2RustType;
-use crate::h2_rust_common::Nullable::NotNull;
+use crate::message::db_error::DbError;
 use crate::mvstore::mv_store::{MVStore};
-use crate::mvstore::page;
+use crate::mvstore::{data_utils, page};
 use crate::mvstore::page::{Page, PageTrait};
 use crate::mvstore::r#type::data_type::DataType;
-use crate::mvstore::root_reference::{RootReference, RootReferenceRef};
+use crate::mvstore::root_reference::{RootReference};
 
 #[derive(Default)]
 pub struct MVMap {
     /// 隶属的上头
-    mv_store: Weak<H2RustCell<MVStore>>,
+    mvStore: WeakPtr<MVStore>,
     id: Integer,
     createVersion: Long,
     keys_buffer: Option<Vec<H2RustType>>,
@@ -28,21 +29,23 @@ pub struct MVMap {
     single_writer: bool,
 
     /// volatile 通过set函数中的mutex模拟
-    rootReference: RootReferenceRef,
+    rootReference: SharedPtr<RootReference>,
     rootReferenceSetMutex: RwLock<()>,
 
     avgKeySize: Option<AtomicI64>,
     avgValSize: Option<AtomicI64>,
     keysPerPage: Integer,
     pub isVolatile: bool,
+    readOnly: bool,
+    closed: AtomicBool,
 }
 
 impl MVMap where {
-    pub fn new(mvStoreWeakPtr: Weak<H2RustCell<MVStore>>,
+    pub fn new(mvStoreWeakPtr: WeakPtr<MVStore>,
                id: Integer,
                key_type: Arc<dyn DataType>,
                value_type: Arc<dyn DataType>) -> Result<SharedPtr<MVMap>> {
-        let arc_h2RustCell_mvStore = mvStoreWeakPtr.upgrade().unwrap();
+        let arc_h2RustCell_mvStore = mvStoreWeakPtr.as_ref().unwrap().upgrade().unwrap();
         let mvStoreRef = arc_h2RustCell_mvStore.get_ref();
 
         let keys_per_page = mvStoreRef.keysPerPage;
@@ -57,22 +60,22 @@ impl MVMap where {
                                     false)?;
         let mvMapMutRef = get_ref_mut!(mv_map_ref);
 
-        mvMapMutRef.set_initial_root(mvMapMutRef.createEmptyLeaf(mv_map_ref.clone()), mvStoreRef.get_current_version());
+        mvMapMutRef.setInitialRoot(mvMapMutRef.createEmptyLeaf(mv_map_ref.clone()), mvStoreRef.get_current_version());
 
         Ok(mv_map_ref.clone())
     }
 
-    fn new1(mvStoreWeakPtr: Weak<H2RustCell<MVStore>>,
+    fn new1(mvStoreWeakPtr: WeakPtr<MVStore>,
             key_type: Arc<dyn DataType>,
             value_type: Arc<dyn DataType>,
             id: Integer,
             create_version: Long,
-            root_reference: RootReferenceRef,
+            root_reference: SharedPtr<RootReference>,
             keys_per_page: Integer,
             single_writer: bool) -> Result<SharedPtr<MVMap>> {
         let mut mv_map = MVMap::default();
 
-        mv_map.mv_store = mvStoreWeakPtr;
+        mv_map.mvStore = mvStoreWeakPtr;
         mv_map.id = id;
         mv_map.createVersion = create_version;
         mv_map.keyType = Some(key_type);
@@ -102,30 +105,33 @@ impl MVMap where {
     }
 
     pub fn is_persistent(&self) -> bool {
-        return self.mv_store.upgrade().is_some() && !self.isVolatile;
+        return self.mvStore.as_ref().unwrap().upgrade().is_some() && !self.isVolatile;
     }
 
-    fn set_initial_root(&mut self, root_page: SharedPtr<dyn PageTrait>, version: Long) {
-        self.set_root_reference(RootReference::new(root_page, version));
+    fn setInitialRoot(&mut self, root_page: SharedPtr<dyn PageTrait>, version: Long) {
+        self.setRootReference(RootReference::new(root_page, version));
     }
 
-    fn set_root_reference(&mut self, root_reference: RootReferenceRef) {
+    fn setRootReference(&mut self, root_reference: SharedPtr<RootReference>) {
         let write_guard = self.rootReferenceSetMutex.write();
         self.rootReference = root_reference;
     }
 
     /// set the position of the root page.
-    pub fn setRootPosition(&self, rootPosition: Long, version: Long, this: SharedPtr<MVMap>) {
+    pub fn setRootPosition(&mut self, rootPosition: Long, version: Long, this: SharedPtr<MVMap>) {
         let mut root: SharedPtr<dyn PageTrait> = self.readOrCreateRootPage(rootPosition, this.clone());
 
         let mvMap = get_ref!(root).getMvMap();
         if h2_rust_cell_equals!(mvMap,this) {
             // this can only happen on concurrent opening of existing map,
-            // when second thread picks up some cached page already owned by
-            // the first map's instantiation (both maps share the same id)
+            // when second thread picks up some cached page already owned by the first map's instantiation (both maps share the same id)
             assert_eq!(self.id, get_ref!(mvMap).id);
 
             root = get_ref!(root).copy(this, false, root.clone());
+
+            self.setInitialRoot(root, version);
+
+            self.setWriteVersion(weak_get_ref!(self.mvStore).currentVersion.load(Ordering::Acquire));
         }
     }
 
@@ -138,15 +144,15 @@ impl MVMap where {
     }
 
     pub fn readPage(&self, this: SharedPtr<MVMap>, position: Long) -> Result<SharedPtr<dyn PageTrait>> {
-        self.mv_store.upgrade().unwrap().get_ref_mut().readPage(this, position)
+        weak_get_ref_mut!(self.mvStore).readPage(this, position)
     }
 
     pub fn get(&self, key: &H2RustType) -> H2RustType {
         self.get2(self.getRootPage(), key)
     }
 
-    pub fn get2(&self, page_trait_ref: SharedPtr<dyn PageTrait>, key: &H2RustType) -> H2RustType {
-        page::get(page_trait_ref, key)
+    pub fn get2(&self, pageTraitSharedPtr: SharedPtr<dyn PageTrait>, key: &H2RustType) -> H2RustType {
+        page::get(pageTraitSharedPtr, key)
     }
 
     pub fn getRootPage(&self) -> SharedPtr<dyn PageTrait> {
@@ -154,8 +160,8 @@ impl MVMap where {
         get_ref!(root_reference_ref).root.clone()
     }
 
-    pub fn flushAndGetRootReference(&self) -> RootReferenceRef {
-        let r = self.get_root_reference();
+    pub fn flushAndGetRootReference(&self) -> SharedPtr<RootReference> {
+        let r = self.getRootReference();
         // todo 因为通常singleWriter是false 且 flushAppendBuffer()很难 暂时的略过
         //if (singleWriter && rootReference.getAppendCounter() > 0) {
         //return flushAppendBuffer(rootReference, true);
@@ -163,7 +169,7 @@ impl MVMap where {
         r
     }
 
-    pub fn get_root_reference(&self) -> RootReferenceRef {
+    pub fn getRootReference(&self) -> SharedPtr<RootReference> {
         let read_guard = self.rootReferenceSetMutex.read();
         self.rootReference.clone()
     }
@@ -179,4 +185,76 @@ impl MVMap where {
     pub fn getId(&self) -> Integer {
         self.id
     }
+
+    pub fn setWriteVersion(&mut self, writeVersion: Long) -> SharedPtr<RootReference> {
+        let mut attempt = 0;
+        loop {
+            let mut rootReference = self.flushAndGetRootReference();
+            if get_ref!(rootReference).version >= writeVersion {
+                return rootReference;
+            }
+
+            if self.closed.load(Ordering::Acquire) {
+                // map was closed a while back and can not possibly be in use by now
+                // it's time to remove it completely from the store (it was anonymous already)
+                if get_ref!(rootReference).getVersion() + 1 < weak_get_ref!(self.mvStore).getOldestVersionToKeep() {
+                    //     mvStore.deregisterMapRoot(id);
+                    //     return Option::default();
+                }
+            }
+        }
+    }
+
+    pub fn remove(&mut self, key: H2RustType) {
+        self.operate(key, H2RustType::Null, DecisionMaker.REMOVE);
+    }
+
+    pub fn operate(&mut self,
+                   key: H2RustType,
+                   value: H2RustType,
+                   decisionMaker: impl DecisionMaker) {
+        let attempt = 0;
+
+        loop {
+            let rootReference = self.flushAndGetRootReference();
+            let locked = get_ref!(rootReference).isLockedByCurrentThread();
+
+            if !locked {
+                if suffix_plus_plus!(attempt) == 0 {
+                    self.beforeWrite();
+                }
+            }
+        }
+    }
+
+    pub fn beforeWrite(&self) -> Result<()> {
+        let mvStore = weak_get_ref!(self.mvStore);
+
+        if self.closed.load(Ordering::Acquire) {
+            let mapName = mvStore.getMapName(self.id);
+        }
+
+        if self.readOnly {
+            throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["this map is read only"]));
+        }
+
+        todo!()
+    }
 }
+
+pub fn getMapRootKey(mapId: Integer) -> String {
+    format!("{}{}", data_utils::META_ROOT, format!("{:x}", mapId))
+}
+
+pub fn getMapKey(mapId: Integer) -> String {
+    format!("{}{}", data_utils::META_MAP, h2_rust_utils::int2HexString(mapId))
+}
+
+pub enum Decision {
+    ABORT,
+    REMOVE,
+    PUT,
+    REPEAT,
+}
+
+pub trait DecisionMaker {}

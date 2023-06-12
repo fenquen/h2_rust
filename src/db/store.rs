@@ -5,9 +5,8 @@ use crate::engine::constant;
 use crate::engine::database::{Database, DatabaseRef};
 use crate::{build_option_arc_h2RustCell, get_ref, get_ref_mut};
 use crate::api::error_code;
-use crate::h2_rust_common::{Integer, Nullable, VecRef};
+use crate::h2_rust_common::{Integer, VecRef};
 use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
-use crate::h2_rust_common::Nullable::NotNull;
 use crate::mvstore::mv_store::{MVStore, MVStoreBuilder};
 use crate::mvstore::{data_utils, mv_store_tool};
 use crate::store::fs::file_utils;
@@ -44,7 +43,7 @@ impl Store {
             let mv_file_path = &this.mvFilePath;
 
             mv_store_tool::compact_clean_up(mv_file_path)?;
-            mv_store_builder.file_name(mv_file_path);
+            mv_store_builder.fileName(mv_file_path);
             mv_store_builder.page_split_size(database.page_size);
 
             if database.read_only {
@@ -86,7 +85,7 @@ impl Store {
     }
 }
 
-pub fn data_utils_error_code_2_error_code(data_utils_error_code: Integer) -> Integer {
+pub fn dataUtilsErrorCode2ErrorCode(data_utils_error_code: Integer) -> Integer {
     match data_utils_error_code {
         data_utils::ERROR_CLOSED => error_code::DATABASE_IS_CLOSED,
         data_utils::ERROR_UNSUPPORTED_FORMAT => error_code::FILE_VERSION_ERROR_1,

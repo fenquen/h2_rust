@@ -8,9 +8,8 @@ use crate::properties_type;
 use anyhow::Result;
 use sys_info::MemInfo;
 use crate::api::error_code;
-use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Long, Nullable, Properties};
+use crate::h2_rust_common::{h2_rust_constant as common_constant, Integer, Long, Properties};
 use crate::h2_rust_common::h2_rust_constant;
-use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 
 pub fn load_properties(prop_file_path: &Path) -> Result<Properties> {
@@ -115,6 +114,10 @@ pub fn getTimestamp() -> Long {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_millis() as Long
+}
+
+pub fn int2HexString(a: Integer) -> String {
+    format!("{:x}", a)
 }
 
 mod test {

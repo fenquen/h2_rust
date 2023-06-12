@@ -8,7 +8,6 @@ use std::thread;
 use crate::h2_rust_common::h2_rust_constant::{NEGATIVE, POSITIVE};
 use anyhow::Result;
 use crate::api::error_code;
-use crate::h2_rust_common::Nullable::{NotNull, Null};
 use crate::message::db_error::DbError;
 
 pub mod h2_rust_macros;
@@ -34,64 +33,6 @@ pub type VecRef<T> = Option<Arc<Vec<T>>>;
 pub fn throw<T, E: Error + Send + Sync + 'static>(e: E) -> Result<T> {
     core::result::Result::Err(e)?
 }
-
-pub enum Nullable<T> {
-    NotNull(T),
-    Null,
-}
-
-impl<T> Nullable<T> {
-    pub fn unwrap(&self) -> &T {
-        match self {
-            NotNull(t) => t,
-            Null => panic!("null")
-        }
-    }
-
-    pub fn unwrap_mut(&mut self) -> &mut T {
-        match self {
-            NotNull(t) => t,
-            Null => panic!("null")
-        }
-    }
-
-    pub fn is_null(&self) -> bool {
-        match self {
-            Null => true,
-            _ => false
-        }
-    }
-
-    pub fn is_not_null(&self) -> bool {
-        !self.is_null()
-    }
-}
-
-impl<T> Default for Nullable<T> {
-    fn default() -> Self {
-        Null
-    }
-}
-
-impl<T> From<Option<T>> for Nullable<T> {
-    fn from(value: Option<T>) -> Self {
-        if let Some(t) = value {
-            NotNull(t)
-        } else {
-            Null
-        }
-    }
-}
-
-impl<T: Clone> Clone for Nullable<T> {
-    fn clone(&self) -> Self {
-        match self {
-            NotNull(t) => NotNull(t.clone()),
-            Null => Null
-        }
-    }
-}
-
 
 #[derive(Default)]
 pub struct MyMutex<T> {
@@ -140,6 +81,16 @@ impl<T> Optional for Option<T> {
     }
 }
 
+pub trait Nullable<T> {
+    fn getNull() -> Option<T>;
+}
+
+impl<T> Nullable<T> for Option<T> {
+    fn getNull() -> Option<T> {
+        None
+    }
+}
+
 pub trait Downgrade<O, R> {
     type WeakAllType: Upgrade<O> + IntoWeak<R>;
 
@@ -147,7 +98,8 @@ pub trait Downgrade<O, R> {
 }
 
 impl<O, T: ?Sized, R> Downgrade<O, R> for Option<Arc<T>> where Option<Arc<T>>: IntoOriginal<O>,
-                                                               Option<Weak<T>>: IntoWeak<R> { // 下边的这个原因是 WeakAllType 需要满足 IntoWeak<R>
+                                                               Option<Weak<T>>: IntoWeak<R> {
+    // 下边的这个原因是 WeakAllType 需要满足 IntoWeak<R>
     type WeakAllType = Option<Weak<T>>;
 
     fn downgrade(&self) -> Self::WeakAllType {
@@ -165,7 +117,8 @@ pub trait Upgrade<O> {
     fn upgrade(&self) -> Self::ArcAllType;
 }
 
-impl<O, T: ?Sized> Upgrade<O> for Option<Weak<T>> where Option<Arc<T>>: IntoOriginal<O> { // 原因 ArcAllType 需要满足 IntoOriginal<O>
+impl<O, T: ?Sized> Upgrade<O> for Option<Weak<T>> where Option<Arc<T>>: IntoOriginal<O> {
+    // 原因 ArcAllType 需要满足 IntoOriginal<O>
     type ArcAllType = Option<Arc<T>>;
 
     fn upgrade(&self) -> Self::ArcAllType {

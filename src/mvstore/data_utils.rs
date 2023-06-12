@@ -413,3 +413,23 @@ pub fn readString2(byteBuffer: &mut ByteBuffer, len: usize) -> String {
     String::from_utf8(chars).unwrap()
 }
 
+pub fn getMapName(metadataString: &str) -> Result<Option<String>> {
+    getFromMap(&metadataString, "name")
+}
+
+pub fn getFromMap(metadataString: &str, key: &str) -> Result<Option<String>> {
+    let metadataStringLength = metadataString.chars().count();
+    let keyLength = key.chars().count();
+
+    let mut a: usize = 0;
+    while a < metadataStringLength {
+        let startKey: usize = a;
+        a = if let Some(position) = (&metadataString[a..]).chars().position(|c| c == ':') {
+            position
+        } else {
+            throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("not a map: {}", metadataString)]));
+        };
+    }
+
+    todo!()
+}
