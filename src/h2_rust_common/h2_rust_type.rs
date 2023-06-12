@@ -23,7 +23,7 @@ impl H2RustType {
     pub fn castAsStringRef(&self) -> &String {
         match self {
             Self::String(s) => { s.get_ref() }
-            _ => { panic!() }
+            _ => { panic!("need string") }
         }
     }
 
