@@ -429,6 +429,11 @@ pub fn getFromMap(metadataString: &str, key: &str) -> Result<Option<String>> {
         } else {
             throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("not a map: {}", metadataString)]));
         };
+
+        if suffix_plus_plus!(a) -startKey ==keyLength {
+            
+        }
+
     }
 
     todo!()
