@@ -102,8 +102,7 @@ impl FileStore {
 
         Ok(())
     }
-
-
+    
     pub fn new() -> Result<SharedPtr<FileStore>> {
         Ok(Some(Arc::new(H2RustCell::new(FileStore::default()))))
     }
