@@ -44,10 +44,10 @@ impl Store {
 
             mv_store_tool::compact_clean_up(mv_file_path)?;
             mv_store_builder.fileName(mv_file_path);
-            mv_store_builder.page_split_size(database.page_size);
+            mv_store_builder.pageSplitSize(database.page_size);
 
             if database.read_only {
-                mv_store_builder.read_only();
+                mv_store_builder.readOnly();
             } else {
                 let exist = file_utils::exist(mv_file_path);
 
@@ -59,7 +59,7 @@ impl Store {
 
                 let auto_compact_fill_rate = database.db_settings.auto_compact_fill_rate;
                 if auto_compact_fill_rate <= 100 {
-                    mv_store_builder.auto_compact_fill_rate(auto_compact_fill_rate);
+                    mv_store_builder.autoCompactFillRate(auto_compact_fill_rate);
                 }
             }
 
@@ -71,10 +71,10 @@ impl Store {
             if database.db_settings.compress_data {
                 mv_store_builder.compress();
                 // use a larger page split size to improve the compression ratio
-                mv_store_builder.page_split_size(64 * 1024);
+                mv_store_builder.pageSplitSize(64 * 1024);
             }
 
-            mv_store_builder.auto_commit_disabled();
+            mv_store_builder.autoCommitDisabled();
         }
 
         this.encrypted = encrypted;

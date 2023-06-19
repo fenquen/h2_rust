@@ -8,3 +8,13 @@ refCell替换内部
     let c = RefCell::new("hello".to_owned());
     *c.borrow_mut() = "bonjour".to_owned();
     assert_eq!(&*c.borrow(), "bonjour");
+
+    if cfg!(target_os = "wasi") {
+
+    }
+    #[cfg(target_os = "wasi")]
+
+    if cfg!(not(target_os = "wasi")) {
+
+    }
+    #[cfg(not(target_os = "wasi"))]

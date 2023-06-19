@@ -181,7 +181,7 @@ pub fn parseMap(s: &String) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
-fn parseMapValue(s: &String, mut a: usize, size: usize) -> Result<(String, usize)> {
+fn parseMapValue(s: &str, mut a: usize, size: usize) -> Result<(String, usize)> {
     let mut result = String::with_capacity(1024);
 
     while a < size {
@@ -424,13 +424,41 @@ pub fn getFromMap(metadataString: &str, key: &str) -> Result<Option<String>> {
     let mut a: usize = 0;
     while a < metadataStringLength {
         let startKey: usize = a;
-        a = if let Some(position) = (&metadataString[a..]).chars().position(|c| c == ':') {
-            position
+        if let Some(position) = (&metadataString[a..]).chars().position(|c| c == ':') {
+           a =  position
         } else {
             throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("not a map: {}", metadataString)]));
         };
 
-        if suffix_plus_plus!(a) - startKey == keyLength {}
+        if suffix_plus_plus!(a) - startKey == keyLength {
+            // 实现 metadataString.regionMatch(startKey, key, 0, keyLength)效力
+            let region = &metadataString[startKey..startKey + keyLength];
+            if region.eq(key) {
+                let value = parseMapValue(metadataString, a, metadataStringLength)?.0;
+                return Ok(Some(value));
+            }
+        }
+
+        while a < metadataStringLength {
+            let mut c = metadataString.chars().nth(suffix_plus_plus!(a)).unwrap();
+            if c == ',' {
+                break;
+            }
+
+            if c == '\"' {
+                while a < metadataStringLength {
+                    c = metadataString.chars().nth(suffix_plus_plus!(a)).unwrap();
+
+                    if c == '\\' {
+                        if suffix_plus_plus!(a) ==metadataStringLength {
+                            throw!(DbError::get(error_code::FILE_CORRUPTED_1, vec![&format!("not a map: {}", metadataString)]));
+                        }
+                    } else if c == '\"' {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     todo!()

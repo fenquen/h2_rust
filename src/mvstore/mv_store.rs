@@ -84,6 +84,7 @@ pub struct MVStore {
 
     retentionTime: Integer,
 
+    unsavedMemory: Integer,
     autoCommitMemory: Integer,
     autoCompactFillRate: Integer,
 
@@ -105,6 +106,8 @@ pub struct MVStore {
     oldestVersionToKeep: AtomicI64,
     versionsToKeep: Integer,
     metaChanged: AtomicBool,
+
+    saveNeeded: AtomicBool,
 }
 
 impl MVStore {
@@ -208,7 +211,7 @@ impl MVStore {
                     mvStoreMutRef.storeHeader.insert(HDR_FORMAT.to_string(), Box::new(FORMAT_WRITE_MAX));
                     mvStoreMutRef.storeHeader.insert(HDR_CREATED.to_string(), Box::new(mvStoreMutRef.creationTime));
 
-                    mvStoreMutRef.set_last_chunk(None);
+                    mvStoreMutRef.setLastChunk(None);
                 }
             }
         }
@@ -216,15 +219,15 @@ impl MVStore {
         Ok(())
     }
 
-    pub fn get_current_version(&self) -> Long {
+    pub fn getCurrentVersion(&self) -> Long {
         self.currentVersion.load(Ordering::Acquire)
     }
 
-    fn set_last_chunk(&mut self, last_chunk: SharedPtr<Chunk>) {
+    fn setLastChunk(&mut self, last_chunk: SharedPtr<Chunk>) {
         self.lastChunk.store(last_chunk.clone());
         self.chunkId_chunk.clear();
         self.lastChunkId = 0;
-        self.currentVersion.store(self.last_chunk_version(), Ordering::Release);
+        self.currentVersion.store(self.lastChunkVersion(), Ordering::Release);
 
         let mut layout_root_pos: Long = 0;
         let mut map_id: Integer = 0;
@@ -243,7 +246,7 @@ impl MVStore {
                                                   self.layout.clone());
     }
 
-    fn last_chunk_version(&self) -> Long {
+    fn lastChunkVersion(&self) -> Long {
         let chunk_ref = unsafe { &*self.lastChunk.as_ptr() };
         if chunk_ref.is_none() {
             INITIAL_VERSION + 1
@@ -257,9 +260,9 @@ impl MVStore {
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
 
-        let mut pageTrait = self.read_page_from_cache(position);
+        let mut pageTrait = self.readPageFromCache(position);
         if pageTrait.is_none() {
-            let chunkSharedPtr = self.get_chunk(position)?;
+            let chunkSharedPtr = self.getChunk(position)?;
             let pageOffset = data_utils::getPageOffset(position);
 
             let mut byteBuffer = get_ref!(chunkSharedPtr).readBufferForPage(self.fileStore.clone(), pageOffset, position)?;
@@ -271,7 +274,7 @@ impl MVStore {
         Ok(pageTrait)
     }
 
-    fn read_page_from_cache(&mut self, position: Long) -> SharedPtr<dyn PageTrait> {
+    fn readPageFromCache(&mut self, position: Long) -> SharedPtr<dyn PageTrait> {
         if self.pageCache.is_none() {
             None
         } else {
@@ -279,13 +282,13 @@ impl MVStore {
         }
     }
 
-    fn get_chunk(&mut self, position: Long) -> Result<SharedPtr<Chunk>> {
+    fn getChunk(&mut self, position: Long) -> Result<SharedPtr<Chunk>> {
         let chunk_id = data_utils::getPageChunkId(position);
 
         let pair = self.chunkId_chunk.get(&chunk_id);
 
         if pair.is_none() || pair.as_ref().unwrap().value().is_none() {
-            self.check_open()?;
+            self.checkOpen()?;
 
             let s = get_ref!(self.layout).get(&H2RustType::String(build_arc_h2RustCell!(chunk::get_meta_key(chunk_id))));
             if s.isNull() {
@@ -305,8 +308,8 @@ impl MVStore {
         }
     }
 
-    fn check_open(&self) -> Result<()> {
-        if !self.is_open_or_stopping() {
+    fn checkOpen(&self) -> Result<()> {
+        if !self.isOpenOrStopping() {
             let error_code = store::dataUtilsErrorCode2ErrorCode(data_utils::ERROR_CLOSED);
             throw!(DbError::get(error_code,vec![]));
         }
@@ -314,7 +317,7 @@ impl MVStore {
         Ok(())
     }
 
-    fn is_open_or_stopping(&self) -> bool {
+    fn isOpenOrStopping(&self) -> bool {
         self.state.load(Ordering::Acquire) <= STATE_STOPPING
     }
 
@@ -341,15 +344,6 @@ impl MVStore {
         v
     }
 
-    fn lastChunkVersion(&self) -> Long {
-        let chunk = unsafe { &*self.lastChunk.as_ptr() };
-        if chunk.is_none() {
-            INITIAL_VERSION + 1
-        } else {
-            get_ref!(chunk).version
-        }
-    }
-
     pub fn deregisterMapRoot(&mut self, mapId: Integer) {
         if get_ref!(self.layout).remove(H2RustType::String(build_arc_h2RustCell!(mv_map::getMapRootKey(mapId)))) != null {
             self.markMetaChanged();
@@ -361,7 +355,7 @@ impl MVStore {
         self.metaChanged.store(true, Ordering::Release);
     }
 
-    fn getMapName(&self, id: Integer) -> Result<Option<String>> {
+    pub fn getMapName(&self, id: Integer) -> Result<Option<String>> {
         // 元信息使用1个string表达
         let h2RustType = get_ref!(self.meta).get(&H2RustType::String(build_arc_h2RustCell!(mv_map::getMapKey(id))));
         if h2RustType.isNull() {
@@ -369,6 +363,58 @@ impl MVStore {
         } else {
             data_utils::getMapName(&h2RustType.toString().unwrap())
         }
+    }
+
+    fn requireStore(&self) -> bool {
+        return 3 * self.unsavedMemory > 4 * self.autoCommitMemory;
+    }
+
+    fn needStore(&self) -> bool {
+        return self.unsavedMemory > self.autoCommitMemory;
+    }
+
+    pub fn beforeWrite(&mut self, mvMap: &MVMap) {
+        if self.saveNeeded.load(Ordering::Acquire) {
+            if self.fileStore.is_some() {
+                if self.isOpenOrStopping() {
+                    // condition below is to prevent potential deadlock,
+                    // because we should never seek storeLock while holding map root lock
+                    if self.storeLock.isHeldByCurrentThread() || !get_ref!(mvMap.getRootReference()).isLockedByCurrentThread() {
+                        // to avoid infinite recursion via store() -> dropUnusedChunks() -> layout.remove()
+                        if mvMap as *const MVMap as usize != self.layout.as_ref().unwrap().get_addr() {
+                            self.saveNeeded.store(false, Ordering::Release);
+
+                            // check again, because it could have been written by now
+                            if self.autoCommitMemory > 0 && self.needStore() {
+                                if self.requireStore() && !mvMap.single_writer {
+                                    self.commit(MVStore::requireStore);
+                                } else {
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn commit(&mut self, check: fn(&mvStore) -> bool) -> Long {
+        if !self.storeLock.isHeldByCurrentThread() || self.currentVersion.load(Ordering::Acquire) < 0 {
+            let mutexGuard = self.storeLock.lock();
+
+            if check(self) {
+                self.store(true);
+            }
+        }
+
+        self.currentVersion.load(Ordering::Acquire)
+    }
+
+    fn store(&mut self, syncWrite: bool) {
+        assert!(self.storeLock.isHeldByCurrentThread());
+        assert!(!self.saveChunkLock.isHeldByCurrentThread());
+
+
     }
 }
 
@@ -386,19 +432,19 @@ impl MVStoreBuilder {
         self.config.insert("fileName".to_string(), Box::new(file_name.to_string()));
     }
 
-    pub fn page_split_size(&mut self, page_split_size: Integer) {
+    pub fn pageSplitSize(&mut self, page_split_size: Integer) {
         self.config.insert("pageSplitSize".to_string(), Box::new(page_split_size));
     }
 
-    pub fn read_only(&mut self) {
+    pub fn readOnly(&mut self) {
         self.config.insert("readOnly".to_string(), Box::new(1));
     }
 
-    pub fn auto_commit_disabled(&mut self) {
+    pub fn autoCommitDisabled(&mut self) {
         self.config.insert("autoCommitDelay".to_string(), Box::new(0));
     }
 
-    pub fn auto_compact_fill_rate(&mut self, value: Integer) {
+    pub fn autoCompactFillRate(&mut self, value: Integer) {
         self.config.insert("autoCompactFillRate".to_string(), Box::new(value));
     }
 

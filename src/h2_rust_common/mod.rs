@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use crate::h2_rust_common::h2_rust_constant::{NEGATIVE, POSITIVE};
 use anyhow::Result;
+use usync::{RawThreadId, ReentrantMutex, ReentrantMutexGuard};
+use usync::lock_api::RawMutex;
 use crate::api::error_code;
 use crate::message::db_error::DbError;
 
@@ -36,34 +38,35 @@ pub fn throw<T, E: Error + Send + Sync + 'static>(e: E) -> Result<T> {
 
 #[derive(Default)]
 pub struct MyMutex<T> {
-    mutex: Mutex<T>,
-    owner_thread_id: AtomicU64,
+    mutex: ReentrantMutex<T>,
+    ownerThreadId: AtomicU64,
 }
 
 pub struct MyMutexGuard<'a, T: ?Sized + 'a> {
-    mutex_guard: MutexGuard<'a, T>,
-    owner_thread_id: &'a AtomicU64,
+    mutexGuard: ReentrantMutexGuard<'a, T>,
+    ownerThreadIdRef: &'a AtomicU64,
 }
 
 impl<T> MyMutex<T> {
     pub fn lock(&self) -> MyMutexGuard<T> {
-        let mutex_guard = self.mutex.lock().unwrap();
-        self.owner_thread_id.store(thread::current().id().as_u64().get(), Ordering::Release);
+        let reentrantMutexGuard = self.mutex.lock();
+
+        self.ownerThreadId.store(thread::current().id().as_u64().get(), Ordering::Release);
         MyMutexGuard {
-            mutex_guard,
-            owner_thread_id: &self.owner_thread_id,
+            mutexGuard: reentrantMutexGuard,
+            ownerThreadIdRef: &self.ownerThreadId,
         }
     }
 
-    pub fn is_held_by_current_thread(&self) -> bool {
-        let current_thread_id = self.owner_thread_id.load(Ordering::Acquire);
+    pub fn isHeldByCurrentThread(&self) -> bool {
+        let current_thread_id = self.ownerThreadId.load(Ordering::Acquire);
         thread::current().id().as_u64().get() == current_thread_id
     }
 }
 
 impl<'a, T: ?Sized + 'a> Drop for MyMutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.owner_thread_id.store(0, Ordering::Release);
+        self.ownerThreadIdRef.store(0, Ordering::Release);
     }
 }
 

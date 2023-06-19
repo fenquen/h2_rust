@@ -26,7 +26,7 @@ pub struct MVMap {
     values_buffer: Option<Vec<H2RustType>>,
     pub keyType: Option<Arc<dyn DataType>>,
     pub valueType: Option<Arc<dyn DataType>>,
-    single_writer: bool,
+    pub single_writer: bool,
 
     /// volatile 通过set函数中的mutex模拟
     rootReference: SharedPtr<RootReference>,
@@ -49,7 +49,7 @@ impl MVMap where {
         let mvStoreRef = arc_h2RustCell_mvStore.get_ref();
 
         let keys_per_page = mvStoreRef.keysPerPage;
-        let current_version = mvStoreRef.get_current_version();
+        let current_version = mvStoreRef.getCurrentVersion();
         let mv_map_ref = Self::new1(mvStoreWeakPtr.clone(),
                                     key_type,
                                     value_type,
@@ -60,7 +60,7 @@ impl MVMap where {
                                     false)?;
         let mvMapMutRef = get_ref_mut!(mv_map_ref);
 
-        mvMapMutRef.setInitialRoot(mvMapMutRef.createEmptyLeaf(mv_map_ref.clone()), mvStoreRef.get_current_version());
+        mvMapMutRef.setInitialRoot(mvMapMutRef.createEmptyLeaf(mv_map_ref.clone()), mvStoreRef.getCurrentVersion());
 
         Ok(mv_map_ref.clone())
     }
@@ -228,16 +228,19 @@ impl MVMap where {
     }
 
     pub fn beforeWrite(&self) -> Result<()> {
-        let mvStore = weak_get_ref!(self.mvStore);
+        let mvStore = weak_get_ref_mut!(self.mvStore);
 
         if self.closed.load(Ordering::Acquire) {
             let mapName = mvStore.getMapName(self.id);
+            throw!(DbError::get(error_code::DATABASE_IS_CLOSED,vec![]));
         }
 
         if self.readOnly {
             throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["this map is read only"]));
         }
 
+
+        mvStore.beforeWrite(self);
         todo!()
     }
 }
