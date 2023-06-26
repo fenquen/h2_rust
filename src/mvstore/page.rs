@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use lazy_static::lazy_static;
 use crate::engine::constant;
-use crate::{get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template};
+use crate::{get_ref, get_ref_mut, suffix_plus_plus, build_option_arc_h2RustCell, throw, db_error_template, load_atomic};
 use crate::api::error_code;
 use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::h2_rust_common::h2_rust_type::H2RustType;
@@ -49,7 +49,7 @@ pub trait PageTrait {
     /// 父类实现
     fn getKeyCount(&self) -> Integer;
 
-    /// 父类实现 直接在trait实现
+    /// 直接在trait实现
     fn isLeaf(&self) -> bool {
         self.getNodeType() == data_utils::PAGE_TYPE_LEAF
     }
@@ -94,19 +94,25 @@ pub trait PageTrait {
     fn getMvMap(&self) -> SharedPtr<MVMap>;
 
     /// abstract
-    fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait>;
+    fn copy(&self,
+            mvMap: SharedPtr<MVMap>,
+            eraseChildrenRefs: bool,
+            actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait>;
 
     /// 专用于leaf
     fn getValues(&self) -> SharedPtr<Vec<H2RustType>> {
         unimplemented!("专用的给leaf")
     }
+
+    /// 父类实现
+    fn isSaved(&self) -> bool;
 }
 
 pub type PageSharedPtr = Option<Arc<H2RustCell<Page>>>;
 
 #[derive(Default)]
 pub struct Page {
-    pub mv_map: SharedPtr<MVMap>,
+    pub mvMap: SharedPtr<MVMap>,
 
     /// The estimated memory used in persistent case, IN_MEMORY marker value otherwise.
     pub memory: Integer,
@@ -133,10 +139,10 @@ impl Page {
     }
 
     pub fn createEmptyLeaf(mv_map_ref: SharedPtr<MVMap>) -> SharedPtr<dyn PageTrait> {
-        let mv_map = get_ref!(mv_map_ref);
+        let mvMap = get_ref!(mv_map_ref);
 
-        let keys = mv_map.keyType.as_ref().unwrap().create_storage(0);
-        let values = mv_map.valueType.as_ref().unwrap().create_storage(0);
+        let keys = mvMap.keyType.as_ref().unwrap().create_storage(0);
+        let values = mvMap.valueType.as_ref().unwrap().create_storage(0);
 
         //drop(mv_map_atomic_ref);
 
@@ -207,7 +213,7 @@ pub fn get(mut pageTraitSharedPtr: SharedPtr<dyn PageTrait>, key: &H2RustType) -
 
 impl PageTrait for Page {
     fn initMemoryCount(&mut self, memory_count: Integer) {
-        if !get_ref!(self.mv_map).is_persistent() {
+        if !get_ref!(self.mvMap).is_persistent() {
             self.memory = IN_MEMORY;
         } else if memory_count == 0 {
             self.recalculateMemory();
@@ -218,7 +224,7 @@ impl PageTrait for Page {
     }
 
     fn binarySearch(&mut self, key: &H2RustType) -> Integer {
-        let mv_map = get_ref!(self.mv_map);
+        let mv_map = get_ref!(self.mvMap);
         let keyType = mv_map.getKeyType();
         let res = keyType.binary_search(key, &self.keys, self.getKeyCount(), self.cached_compare);
         self.cached_compare = if res < 0 {
@@ -285,8 +291,8 @@ impl PageTrait for Page {
 
         // mapId
         let mvMapId = data_utils::readVarInt(byteBuffer);
-        if mvMapId != get_ref!(self.mv_map).getId() {
-            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected map id {}, got {}", chunkId, get_ref!(self.mv_map).getId(), mvMapId));
+        if mvMapId != get_ref!(self.mvMap).getId() {
+            throw!(db_error_template!(error_code::FILE_CORRUPTED_1, "file corrupted in chunk {}, expected map id {}, got {}", chunkId, get_ref!(self.mvMap).getId(), mvMapId));
         }
 
         // keyCount
@@ -308,7 +314,7 @@ impl PageTrait for Page {
 
         // todo rust略过压缩
 
-        get_ref!(self.mv_map).getKeyType().read_3(byteBuffer, &mut self.keys, keyCount);
+        get_ref!(self.mvMap).getKeyType().read_3(byteBuffer, &mut self.keys, keyCount);
 
         if self.isLeaf() {
             get_ref_mut!(actual).readPayLoad(byteBuffer);
@@ -322,12 +328,12 @@ impl PageTrait for Page {
     }
 
     fn createKeyStorage(&self, size: Integer) -> Vec<H2RustType> {
-        let keyType = get_ref!(self.mv_map).getKeyType();
+        let keyType = get_ref!(self.mvMap).getKeyType();
         keyType.create_storage(size)
     }
 
     fn createValueStorage(&self, size: Integer) -> Vec<H2RustType> {
-        let valueType = get_ref!(self.mv_map).getValueType();
+        let valueType = get_ref!(self.mvMap).getValueType();
         valueType.create_storage(size)
     }
 
@@ -348,11 +354,15 @@ impl PageTrait for Page {
     }
 
     fn getMvMap(&self) -> SharedPtr<MVMap> {
-        self.mv_map.clone()
+        self.mvMap.clone()
     }
 
     fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait> {
         unimplemented!("abstract 需要由子类实现")
+    }
+
+    fn isSaved(&self) -> bool {
+        data_utils::isPageSaved(load_atomic!(self.position))
     }
 }
 
@@ -368,7 +378,7 @@ impl Leaf {
 
         {
             let pageMutRef = pageRef.as_ref().unwrap().get_ref_mut();
-            pageMutRef.mv_map = mvMapSharedPtr;
+            pageMutRef.mvMap = mvMapSharedPtr;
         }
 
         let mut leaf = Leaf::default();
@@ -390,7 +400,7 @@ impl Leaf {
 
         {
             let pageMutRef = get_ref_mut!(page_ref);
-            pageMutRef.mv_map = mv_map_ref;
+            pageMutRef.mvMap = mv_map_ref;
             pageMutRef.keys = keys;
         }
 
@@ -459,7 +469,7 @@ impl PageTrait for Leaf {
 
         let page = get_ref!(self.page);
 
-        get_ref!(page.mv_map).getValueType().read_3(byteBuffer, get_ref_mut!(self.values), keyCount);
+        get_ref!(page.mvMap).getValueType().read_3(byteBuffer, get_ref_mut!(self.values), keyCount);
     }
 
     fn is_persistent(&self) -> bool {
@@ -481,6 +491,10 @@ impl PageTrait for Leaf {
     fn getValues(&self) -> SharedPtr<Vec<H2RustType>> {
         self.values.clone()
     }
+
+    fn isSaved(&self) -> bool {
+        get_ref!(self.page).isSaved()
+    }
 }
 
 #[derive(Default)]
@@ -500,7 +514,7 @@ impl NonLeaf {
 
         {
             let pageMutRef = get_ref_mut!(pageRef);
-            pageMutRef.mv_map = mvMapSharedPtr;
+            pageMutRef.mvMap = mvMapSharedPtr;
         }
 
         let mut nonLeaf = NonLeaf::default();
@@ -546,9 +560,9 @@ impl PageTrait for NonLeaf {
 
         if pageTraitSharedPtr.is_none() {
             let pageRef = get_ref!(self.page);
-            let mvMapRef = get_ref!(pageRef.mv_map);
+            let mvMapRef = get_ref!(pageRef.mvMap);
 
-            pageTraitSharedPtr = mvMapRef.readPage(pageRef.mv_map.clone(), pageReferenceRef.position).unwrap();
+            pageTraitSharedPtr = mvMapRef.readPage(pageRef.mvMap.clone(), pageReferenceRef.position).unwrap();
             assert_eq!(pageReferenceRef.position, get_ref!(pageTraitSharedPtr).getPosition());
             assert_eq!(pageReferenceRef.count, get_ref!(pageTraitSharedPtr).getTotalCount());
         }
@@ -629,6 +643,11 @@ impl PageTrait for NonLeaf {
 
     fn copy(&self, mvMap: SharedPtr<MVMap>, eraseChildrenRefs: bool, actual: SharedPtr<dyn PageTrait>) -> SharedPtr<dyn PageTrait> {
         todo!()
+    }
+
+
+    fn isSaved(&self) -> bool {
+        get_ref!(self.page).isSaved()
     }
 }
 

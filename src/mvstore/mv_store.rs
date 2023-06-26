@@ -15,14 +15,7 @@ use crate::mvstore::file_store::{FileStore};
 use crate::mvstore::mv_map::{MVMap};
 use crate::mvstore::page::{Page, PageTrait};
 use crate::mvstore::r#type::string_data_type;
-use crate::{
-    atomic_ref_cell,
-    atomic_ref_cell_mut,
-    get_ref_mut,
-    build_option_arc_h2RustCell,
-    get_ref,
-    throw,
-    build_arc_h2RustCell};
+use crate::{atomic_ref_cell, atomic_ref_cell_mut, get_ref_mut, build_option_arc_h2RustCell, get_ref, throw, build_arc_h2RustCell, load_atomic};
 use crate::api::error_code;
 use crate::db::store;
 use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr, WeakPtr};
@@ -79,6 +72,8 @@ pub struct MVStore {
     /// The metadata map. Holds name -> id and id -> name and id -> metadata
     /// mapping for all maps. This is relatively slow changing part of metadata
     meta: SharedPtr<MVMap>,
+
+    mvMapId_mvMap: DashMap<Integer, SharedPtr<MVMap>>,
 
     pub currentVersion: AtomicI64,
 
@@ -256,7 +251,7 @@ impl MVStore {
     }
 
     pub fn readPage(&mut self, mvMap: SharedPtr<MVMap>, position: Long) -> Result<SharedPtr<dyn PageTrait>> {
-        if !data_utils::is_page_saved(position) { // position不能是0
+        if !data_utils::isPageSaved(position) { // position不能是0
             throw!(DbError::get_internal_error("ERROR_FILE_CORRUPT,Position 0"))
         }
 
@@ -388,8 +383,7 @@ impl MVStore {
                             if self.autoCommitMemory > 0 && self.needStore() {
                                 if self.requireStore() && !mvMap.single_writer {
                                     self.commit(MVStore::requireStore);
-                                } else {
-                                }
+                                } else {}
                             }
                         }
                     }
@@ -414,7 +408,34 @@ impl MVStore {
         assert!(self.storeLock.isHeldByCurrentThread());
         assert!(!self.saveChunkLock.isHeldByCurrentThread());
 
+        if !self.isOpenOrStopping() {
+            return;
+        }
 
+        if !self.hasUnsavedChanges() {
+            return;
+        }
+
+        ();
+    }
+
+    pub fn hasUnsavedChanges(&self) -> bool {
+        if self.metaChanged.load(Ordering::Acquire) {
+            return true;
+        }
+
+        let lastStoredVersion = load_atomic!(self.currentVersion) - 1;
+
+        for entry in &self.mvMapId_mvMap {
+            let mvMap = entry.value().clone();
+            if !load_atomic!(get_ref!(mvMap).closed) {
+                if get_ref!(mvMap).hasChangesSince(lastStoredVersion) {
+                    return true;
+                }
+            }
+        }
+
+        get_ref!(self.layout).hasChangesSince(lastStoredVersion) && lastStoredVersion > INITIAL_VERSION
     }
 }
 

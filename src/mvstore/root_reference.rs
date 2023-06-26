@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 use crate::{build_option_arc_h2RustCell, get_ref, h2_rust_cell_equals};
-use crate::h2_rust_common::{Byte, Long};
+use crate::h2_rust_common::{Byte, Integer, Long};
 use crate::h2_rust_common::h2_rust_cell::{H2RustCell, SharedPtr};
 use crate::mvstore::page::{PageTrait};
 
@@ -62,5 +62,23 @@ impl RootReference {
 
     pub fn isLockedByCurrentThread(&self) -> bool {
         self.holdCount != 0 && self.ownerId == thread::current().id().as_u64().get() as Long
+    }
+
+    pub fn hasChangesSince(&self, version: Long, persistent: bool) -> bool {
+            persistent &&
+                if get_ref!(self.root).isSaved() {
+                    self.getAppendCounter() > 0
+                } else {
+                    self.getTotalCount() > 0
+                } ||
+                self.getVersion() > version
+    }
+
+    pub fn getAppendCounter(&self) -> Integer {
+        return (self.appendCounter & 0xff) as Integer;
+    }
+
+    pub fn getTotalCount(&self) -> Long {
+        get_ref!(self.root).getTotalCount() + self.getAppendCounter()
     }
 }

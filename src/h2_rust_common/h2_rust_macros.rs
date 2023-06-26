@@ -197,8 +197,15 @@ macro_rules! suffix_minus_minus {
 
 #[macro_export]
 macro_rules! db_error_template {
-    ($errorCode:expr,$template:expr,$($variant:expr),*) => {
+    ($errorCode:expr, $template:expr, $($variant:expr),*) => {
         DbError::get($errorCode, vec![&format!($template, $($variant),*)])
+    };
+}
+
+#[macro_export]
+macro_rules! load_atomic {
+    ($atomic:expr) => {
+        $atomic.load(Ordering::Acquired)
     };
 }
 

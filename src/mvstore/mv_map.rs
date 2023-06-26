@@ -37,7 +37,7 @@ pub struct MVMap {
     keysPerPage: Integer,
     pub isVolatile: bool,
     readOnly: bool,
-    closed: AtomicBool,
+    pub closed: AtomicBool,
 }
 
 impl MVMap where {
@@ -66,38 +66,38 @@ impl MVMap where {
     }
 
     fn new1(mvStoreWeakPtr: WeakPtr<MVStore>,
-            key_type: Arc<dyn DataType>,
-            value_type: Arc<dyn DataType>,
+            keyType: Arc<dyn DataType>,
+            valueType: Arc<dyn DataType>,
             id: Integer,
-            create_version: Long,
-            root_reference: SharedPtr<RootReference>,
-            keys_per_page: Integer,
-            single_writer: bool) -> Result<SharedPtr<MVMap>> {
-        let mut mv_map = MVMap::default();
+            createVersion: Long,
+            rootReference: SharedPtr<RootReference>,
+            keysPerPage: Integer,
+            singleWriter: bool) -> Result<SharedPtr<MVMap>> {
+        let mut mvMap = MVMap::default();
 
-        mv_map.mvStore = mvStoreWeakPtr;
-        mv_map.id = id;
-        mv_map.createVersion = create_version;
-        mv_map.keyType = Some(key_type);
-        mv_map.valueType = Some(value_type);
-        mv_map.rootReference = root_reference;
-        mv_map.keysPerPage = keys_per_page;
-        mv_map.single_writer = single_writer;
+        mvMap.mvStore = mvStoreWeakPtr;
+        mvMap.id = id;
+        mvMap.createVersion = createVersion;
+        mvMap.keyType = Some(keyType);
+        mvMap.valueType = Some(valueType);
+        mvMap.rootReference = rootReference;
+        mvMap.keysPerPage = keysPerPage;
+        mvMap.single_writer = singleWriter;
 
-        if single_writer {
-            mv_map.keys_buffer = Some(mv_map.keyType.as_ref().unwrap().create_storage(keys_per_page));
-            mv_map.values_buffer = Some(mv_map.valueType.as_ref().unwrap().create_storage(keys_per_page));
+        if singleWriter {
+            mvMap.keys_buffer = Some(mvMap.keyType.as_ref().unwrap().create_storage(keysPerPage));
+            mvMap.values_buffer = Some(mvMap.valueType.as_ref().unwrap().create_storage(keysPerPage));
         }
 
-        if mv_map.keyType.as_ref().unwrap().is_memory_estimation_allowed() {
-            mv_map.avgKeySize = Some(AtomicI64::new(0));
+        if mvMap.keyType.as_ref().unwrap().is_memory_estimation_allowed() {
+            mvMap.avgKeySize = Some(AtomicI64::new(0));
         }
 
-        if mv_map.valueType.as_ref().unwrap().is_memory_estimation_allowed() {
-            mv_map.avgValSize = Some(AtomicI64::new(0));
+        if mvMap.valueType.as_ref().unwrap().is_memory_estimation_allowed() {
+            mvMap.avgValSize = Some(AtomicI64::new(0));
         }
 
-        Ok(build_option_arc_h2RustCell!(mv_map))
+        Ok(build_option_arc_h2RustCell!(mvMap))
     }
 
     fn createEmptyLeaf(&self, this: SharedPtr<MVMap>) -> SharedPtr<dyn PageTrait> {
@@ -239,9 +239,12 @@ impl MVMap where {
             throw!(DbError::get(error_code::GENERAL_ERROR_1,vec!["this map is read only"]));
         }
 
-
         mvStore.beforeWrite(self);
         todo!()
+    }
+
+    pub fn hasChangesSince(&self, version: Long) -> bool {
+        get_ref!(self.getRootReference()).hasChangesSince(version, self.is_persistent())
     }
 }
 

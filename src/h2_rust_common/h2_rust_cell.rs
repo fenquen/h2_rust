@@ -2,6 +2,7 @@ use std::cell::UnsafeCell;
 use std::{mem, ptr};
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
+use libc::option;
 use crate::h2_rust_common::Optional;
 
 pub type SharedPtr<V> = Option<Arc<H2RustCell<V>>>;

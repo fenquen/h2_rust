@@ -148,7 +148,7 @@ pub fn check_argument(test: bool, message: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn is_page_saved(position: Long) -> bool {
+pub fn isPageSaved(position: Long) -> bool {
     (position & !1) != 0
 }
 
